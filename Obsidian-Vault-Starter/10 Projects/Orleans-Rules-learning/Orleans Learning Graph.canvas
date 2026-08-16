@@ -1,0 +1,295 @@
+{
+  "nodes": [
+    {
+      "id": "hub",
+      "type": "file",
+      "file": "10 Projects/Orleans-Rules-learning/00 Project Hub.md",
+      "x": 0,
+      "y": 0,
+      "width": 360,
+      "height": 260
+    },
+    {
+      "id": "fund",
+      "type": "file",
+      "file": "10 Projects/Orleans-Rules-learning/01 Fundamentals/Orleans Mental Model.md",
+      "x": -900,
+      "y": -350,
+      "width": 330,
+      "height": 220
+    },
+    {
+      "id": "grains",
+      "type": "file",
+      "file": "10 Projects/Orleans-Rules-learning/01 Fundamentals/Grains.md",
+      "x": -900,
+      "y": -50,
+      "width": 330,
+      "height": 220
+    },
+    {
+      "id": "cluster",
+      "type": "file",
+      "file": "10 Projects/Orleans-Rules-learning/01 Fundamentals/Silos Clusters and Clients.md",
+      "x": -900,
+      "y": 250,
+      "width": 330,
+      "height": 220
+    },
+    {
+      "id": "persist",
+      "type": "file",
+      "file": "10 Projects/Orleans-Rules-learning/02 Grain State/Grain State Persistence.md",
+      "x": -450,
+      "y": -500,
+      "width": 330,
+      "height": 220
+    },
+    {
+      "id": "state",
+      "type": "file",
+      "file": "10 Projects/Orleans-Rules-learning/02 Grain State/State Lifecycle.md",
+      "x": -450,
+      "y": -200,
+      "width": 330,
+      "height": 220
+    },
+    {
+      "id": "conc",
+      "type": "file",
+      "file": "10 Projects/Orleans-Rules-learning/03 Concurrency/Orleans Concurrency Mental Model.md",
+      "x": 450,
+      "y": -500,
+      "width": 330,
+      "height": 220
+    },
+    {
+      "id": "reentrant",
+      "type": "file",
+      "file": "10 Projects/Orleans-Rules-learning/03 Concurrency/Reentrant.md",
+      "x": 850,
+      "y": -520,
+      "width": 330,
+      "height": 220
+    },
+    {
+      "id": "interleave",
+      "type": "file",
+      "file": "10 Projects/Orleans-Rules-learning/03 Concurrency/When to Use Concurrency Attributes.md",
+      "x": 850,
+      "y": -180,
+      "width": 330,
+      "height": 220
+    },
+    {
+      "id": "rules",
+      "type": "file",
+      "file": "10 Projects/Orleans-Rules-learning/04 Rules Engine/Dynamic Rules Engine.md",
+      "x": 450,
+      "y": 350,
+      "width": 330,
+      "height": 220
+    },
+    {
+      "id": "flow",
+      "type": "file",
+      "file": "10 Projects/Orleans-Rules-learning/04 Rules Engine/Rules Execution Flow.md",
+      "x": 850,
+      "y": 350,
+      "width": 330,
+      "height": 220
+    },
+    {
+      "id": "aspire",
+      "type": "file",
+      "file": "10 Projects/Orleans-Rules-learning/05 Observability/DotNET Aspire with Orleans.md",
+      "x": -450,
+      "y": 450,
+      "width": 330,
+      "height": 220
+    },
+    {
+      "id": "dash",
+      "type": "file",
+      "file": "10 Projects/Orleans-Rules-learning/05 Observability/Orleans Dashboard.md",
+      "x": -900,
+      "y": 500,
+      "width": 330,
+      "height": 220
+    },
+    {
+      "id": "tutorial",
+      "type": "file",
+      "file": "10 Projects/Orleans-Rules-learning/06 Tutorial/Tutorial Overview.md",
+      "x": 0,
+      "y": 550,
+      "width": 330,
+      "height": 220
+    },
+    {
+      "id": "arch",
+      "type": "file",
+      "file": "10 Projects/Orleans-Rules-learning/06 Tutorial/Tutorial Architecture.md",
+      "x": 450,
+      "y": 700,
+      "width": 330,
+      "height": 220
+    },
+    {
+      "id": "next",
+      "type": "file",
+      "file": "10 Projects/Orleans-Rules-learning/06 Tutorial/Next Learning Topics.md",
+      "x": 0,
+      "y": 900,
+      "width": 330,
+      "height": 220
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-hub-fund",
+      "fromNode": "hub",
+      "toNode": "fund"
+    },
+    {
+      "id": "e-hub-grains",
+      "fromNode": "hub",
+      "toNode": "grains"
+    },
+    {
+      "id": "e-hub-cluster",
+      "fromNode": "hub",
+      "toNode": "cluster"
+    },
+    {
+      "id": "e-hub-persist",
+      "fromNode": "hub",
+      "toNode": "persist"
+    },
+    {
+      "id": "e-hub-state",
+      "fromNode": "hub",
+      "toNode": "state"
+    },
+    {
+      "id": "e-hub-conc",
+      "fromNode": "hub",
+      "toNode": "conc"
+    },
+    {
+      "id": "e-hub-reentrant",
+      "fromNode": "hub",
+      "toNode": "reentrant"
+    },
+    {
+      "id": "e-hub-interleave",
+      "fromNode": "hub",
+      "toNode": "interleave"
+    },
+    {
+      "id": "e-hub-rules",
+      "fromNode": "hub",
+      "toNode": "rules"
+    },
+    {
+      "id": "e-hub-flow",
+      "fromNode": "hub",
+      "toNode": "flow"
+    },
+    {
+      "id": "e-hub-aspire",
+      "fromNode": "hub",
+      "toNode": "aspire"
+    },
+    {
+      "id": "e-hub-dash",
+      "fromNode": "hub",
+      "toNode": "dash"
+    },
+    {
+      "id": "e-hub-tutorial",
+      "fromNode": "hub",
+      "toNode": "tutorial"
+    },
+    {
+      "id": "e-hub-arch",
+      "fromNode": "hub",
+      "toNode": "arch"
+    },
+    {
+      "id": "e-hub-next",
+      "fromNode": "hub",
+      "toNode": "next"
+    },
+    {
+      "id": "s0",
+      "fromNode": "fund",
+      "toNode": "grains"
+    },
+    {
+      "id": "s1",
+      "fromNode": "grains",
+      "toNode": "cluster"
+    },
+    {
+      "id": "s2",
+      "fromNode": "fund",
+      "toNode": "persist"
+    },
+    {
+      "id": "s3",
+      "fromNode": "persist",
+      "toNode": "state"
+    },
+    {
+      "id": "s4",
+      "fromNode": "state",
+      "toNode": "conc"
+    },
+    {
+      "id": "s5",
+      "fromNode": "conc",
+      "toNode": "reentrant"
+    },
+    {
+      "id": "s6",
+      "fromNode": "conc",
+      "toNode": "interleave"
+    },
+    {
+      "id": "s7",
+      "fromNode": "state",
+      "toNode": "rules"
+    },
+    {
+      "id": "s8",
+      "fromNode": "rules",
+      "toNode": "flow"
+    },
+    {
+      "id": "s9",
+      "fromNode": "aspire",
+      "toNode": "dash"
+    },
+    {
+      "id": "s10",
+      "fromNode": "tutorial",
+      "toNode": "arch"
+    },
+    {
+      "id": "s11",
+      "fromNode": "arch",
+      "toNode": "flow"
+    },
+    {
+      "id": "s12",
+      "fromNode": "arch",
+      "toNode": "aspire"
+    },
+    {
+      "id": "s13",
+      "fromNode": "tutorial",
+      "toNode": "next"
+    }
+  ]
+}

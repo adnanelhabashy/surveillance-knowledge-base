@@ -1,0 +1,56 @@
+---
+id: CASE-536
+type: surveillance-case
+case_number: 536
+title: "Matching-Engine Stress Manipulation"
+status: implementation-seeded
+implementation_archetype: message_abuse
+smarts_public_mapping: not-mapped-from-public-material
+tags:
+  - surveillance/case
+---
+
+# 536. Matching-Engine Stress Manipulation
+
+## Description
+
+Generating excessive or strategically structured messages with the intent to disrupt or degrade fair market processing.
+
+## Surveillance families
+
+- [[Families/FAMILY-20|Algorithmic/HFT manipulation, probing & message abuse]]
+
+## Reusable detector starting points
+
+- [[Detectors/DETECTOR-21|Order-Message Burst Rate]]
+- [[Detectors/DETECTOR-02|Order Lifetime]]
+- [[Detectors/DETECTOR-18|Cross-Venue Synchronization]]
+
+## Related cases
+
+- [[Cases/CASE-318|Feed-Delay Quote Stuffing]]
+- [[Cases/CASE-317|Cross-Symbol Quote Stuffing]]
+- [[Cases/CASE-025|Order Stuffing]]
+- [[Cases/CASE-481|Hidden Order-Priority Advantage]]
+- [[Cases/CASE-537|Cancel-Reenter Queue Monopolization]]
+
+## SMARTS mapping
+
+- **Public mapping:** Not mapped to an explicitly named Nasdaq SMARTS behavior from the public material used by the source catalog.
+- Keep this as a surveillance requirement candidate rather than claiming SMARTS coverage.
+
+## Implementation workspace
+
+- **Rule status:** Initial deterministic model
+- **Detection mode:** Rules; AI not required
+- **Rule logic (starter):** Flag bursts of order/quote messages whose rate, cancellation intensity and short lifetimes are extreme relative to the instrument/participant baseline and which materially disturb visible liquidity, spreads, queues or matching-engine conditions.
+- **Orleans grains/state:** OrderBookGrain, TraderGrain, InstrumentGrain, VenueGrain, SurveillanceGrain; maintain message-rate counters, cancel/replace bursts, queue/depth deltas and throttling/control events
+- **Required event fields:** eventTime, orderId, traderId, accountId, instrumentId, venueId, side, price, quantity, action, sequenceNo, messageType, bestBid/bestAsk, depth, reject/throttle/status codes if available
+- **Time window(s):** 100 ms, 1 s, 5 s burst windows plus rolling 60 s baseline
+- **Thresholds/calibration:** Start with message rate > 99.5th percentile or ≥ 10× participant baseline, cancellation/replace ratio ≥ 90%, median lifetime ≤ 1 s, and measurable spread/depth/queue disruption. Calibrate by venue protocol and liquidity bucket.
+- **Alert evidence:** Ordered message sequence; messages/sec; cancel/replace ratio; order lifetimes; queue/depth changes; spread change; venue rejects/throttles; executions gained during/after burst
+- **Implementation note:** Starter engineering model only. Calibrate by instrument liquidity, session phase, participant type and historical percentiles before production use.
+
+## Source
+
+- [[Sources/Trading Surveillance Catalog 540|Trading Surveillance Catalog — 540 cases]]

@@ -1,0 +1,35 @@
+{
+  "collapse-filter": false,
+  "search": "-path:\"Templates\" -path:\"Sources\"",
+  "showTags": false,
+  "showAttachments": false,
+  "hideUnresolved": true,
+  "showOrphans": false,
+  "collapse-color-groups": false,
+  "colorGroups": [
+    {
+      "query": "tag:#surveillance/case"
+    },
+    {
+      "query": "tag:#surveillance/family"
+    },
+    {
+      "query": "tag:#surveillance/detector"
+    },
+    {
+      "query": "tag:#surveillance/architecture"
+    }
+  ],
+  "collapse-display": false,
+  "showArrow": false,
+  "textFadeMultiplier": 0,
+  "nodeSizeMultiplier": 1,
+  "lineSizeMultiplier": 1,
+  "collapse-forces": true,
+  "centerStrength": 0.518713248970312,
+  "repelStrength": 10,
+  "linkStrength": 1,
+  "linkDistance": 250,
+  "scale": 0.35,
+  "close": true
+}
