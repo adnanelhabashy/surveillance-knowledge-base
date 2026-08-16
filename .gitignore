@@ -1,1 +1,10 @@
-.smart-env
+# Obsidian per-user app config, workspace & appearance (each machine keeps its own)
+.obsidian/
+
+# Plugin local data (Smart Connections embeddings, Claudian sessions, MCP)
+.smart-env/
+.claudian/
+.obsidian-mcp/
+
+# macOS
+.DS_Store
