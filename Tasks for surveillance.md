@@ -6,6 +6,7 @@ kanban-plugin: board
 
 ## Tasks
 
+- [ ] New Test Task
 
 
 ## In Progress
