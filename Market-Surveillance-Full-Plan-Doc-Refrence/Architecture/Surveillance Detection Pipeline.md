@@ -1,33 +1,20 @@
 ---
 type: architecture-note
+status: legacy-non-authoritative
 tags:
   - surveillance/architecture
+  - archive/legacy
 ---
 
-# Surveillance Detection Pipeline
+# Surveillance Detection Pipeline - Legacy Placeholder
 
-This note is a starting bridge from the case graph to the Orleans + dynamic-rules implementation.
+> [!CAUTION]
+> The previous Orleans + dynamic-rules pipeline is **not the active design**. The restarted project currently defines only the business case catalog and the data input boundary.
 
-```text
-Market events / reference data
-            ↓
-         Orleans
-            ↓
-Reusable behavioral detectors
-            ↓
-     Dynamic rules engine
-            ↓
-          Alerts
-            ↓
- Investigation / case workflow
+```mermaid
+flowchart LR
+    C[540 business cases] --> D[Future detection architecture - TBD]
+    I[Current DROP data interface] --> D
 ```
 
-## Graph entry points
-
-- [[MOCs/01 - Surveillance Case Map|540-case surveillance map]]
-- [[MOCs/03 - Reusable Detector Map|Reusable detector map]]
-- [[MOCs/02 - SMARTS Public Coverage|SMARTS publicly described coverage]]
-
-## Design principle
-
-Do not build 540 isolated algorithms. Build reusable state and behavioral detectors, then combine their facts into many dynamic rules.
+Use [[DROP-Current-System/06 - Surveillance Data Interface Boundary|Surveillance Data Interface Boundary]] and [[MOCs/01 - Surveillance Case Map|Surveillance Case Map]] as the current starting points.
