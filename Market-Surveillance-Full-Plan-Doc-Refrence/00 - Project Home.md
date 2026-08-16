@@ -1,53 +1,41 @@
 ---
 type: project-home
-project: Market Surveillance
 status: active
 tags:
   - project/market-surveillance
 ---
-a
-# Market Surveillance — Project Home
 
-This Obsidian project starts with **540 stock-market trading-surveillance scenarios** and turns them into a connected graph for the Orleans + dynamic-rules surveillance project.
+# Market Surveillance - Project Home
 
-## Start here
+> [!IMPORTANT]
+> **Restart baseline:** we are gathering business requirements and the real DROP data interface first. Previous surveillance implementation architecture is **legacy / not authoritative** for the new build.
 
-1. [[MOCs/01 - Surveillance Case Map|Surveillance Case Map]] — browse the 540 cases by family.
-2. [[MOCs/03 - Reusable Detector Map|Reusable Detector Map]] — see the reusable facts that can power many cases.
-3. [[Architecture/Surveillance Detection Pipeline|Surveillance Detection Pipeline]] — bridge the knowledge graph to the application architecture.
-4. [[MOCs/02 - SMARTS Public Coverage|SMARTS Publicly Described Coverage]] — keep public SMARTS claims separate from our broader requirements catalog.
+## Start here now
 
-## Graph structure
+1. [[MOCs/04 - Current DROP System Map|Current DROP System Map]] - current feed, protocol, runtime and data interface.
+2. [[DROP-Current-System/02 - DROP Message Catalog|DROP Message Catalog]] - all 37 official DROP messages with field-level notes.
+3. [[DROP-Current-System/06 - Surveillance Data Interface Boundary|Surveillance Data Interface Boundary]] - exactly what the future surveillance system can consume, without choosing implementation yet.
+4. [[MOCs/01 - Surveillance Case Map|Surveillance Case Map]] - the 540 business surveillance scenarios.
+5. [[MOCs/03 - Reusable Detector Map|Reusable Detector Map]] - historical/business detector concepts; implementation decisions are not frozen.
 
-```text
-Project Home
-    ├── Surveillance Families
-    │       └── 540 Case Notes
-    │               ├── Related Cases
-    │               └── Reusable Detectors
-    ├── SMARTS Public Coverage
-    └── Architecture
+## Current knowledge model
+
+```mermaid
+flowchart TB
+    B[540 business surveillance cases] --> N[New surveillance design - TBD]
+    DROP[Current EGX DROP protocol + platform] --> IFACE[Surveillance data interface]
+    IFACE --> N
+    SRC[Verified source hierarchy] --> DROP
+    LEG[Previous implementation trial] -. archived / non-authoritative .-> N
 ```
 
-## Current seed
+## Current baseline rule
 
-- **Cases:** 540
-- **Surveillance families:** 25
-- **Reusable detector concepts:** 22
-- **SMARTS mappings explicitly described in public source material:** 12 exact catalog entries
-- **Additional catalog variants of publicly described behavior:** 55
+- Build business understanding first.
+- Use official DROP protocol semantics and verified current platform docs as data truth.
+- Keep current-vs-proposed-vs-legacy status explicit.
+- Do not reuse the previous surveillance implementation as an approved architecture.
 
-## Next graph layers to add
+## Legacy implementation area
 
-- Orleans grains (`OrderBookGrain`, `TraderGrain`, `InvestorGrain`, `AccountGrain`, etc.)
-- Market event types
-- Facts produced by each grain
-- Dynamic rule definitions
-- Required fields/data sources
-- Alert evidence and severity
-- Test scenarios and replay datasets
-
-
-## Implementation architecture
-
-- [[Implementation-Architecture/00 - Implementation Architecture Home|Implementation Architecture]]
+[[Implementation-Architecture/00 - Implementation Architecture Home|Previous Implementation Architecture]] remains in the vault for historical traceability only and is now marked legacy/non-authoritative.
