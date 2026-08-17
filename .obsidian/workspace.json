@@ -1,30 +1,24 @@
 {
   "main": {
-    "id": "e5be119a1ead86f6",
+    "id": "4d6048e52335a23e",
     "type": "split",
     "children": [
       {
-        "id": "33c8955dea9e85e8",
+        "id": "ae0dc24a83c89679",
         "type": "tabs",
         "children": [
           {
-            "id": "3a29acb1ba55b69d",
+            "id": "d98a7c36b6cb278d",
             "type": "leaf",
             "state": {
-              "type": "kanban",
+              "type": "markdown",
               "state": {
-                "file": "Tasks for surveillance.md",
-                "kanbanViewState": {
-                  "kanban-plugin": "board",
-                  "list-collapse": [
-                    false,
-                    false,
-                    false
-                  ]
-                }
+                "file": "Market-Surveillance-Full-Plan-Doc-Refrence/Architecture/Implementation-Start/00 - Implementation Start Home.md",
+                "mode": "source",
+                "source": false
               },
-              "icon": "lucide-trello",
-              "title": "Tasks for surveillance"
+              "icon": "lucide-file",
+              "title": "00 - Implementation Start Home"
             }
           }
         ]
@@ -33,21 +27,21 @@
     "direction": "vertical"
   },
   "left": {
-    "id": "25db85ad85f0264b",
+    "id": "d9387eec9f5de1c7",
     "type": "split",
     "children": [
       {
-        "id": "9483b1f1faaa25d1",
+        "id": "73cf7d863f82ab67",
         "type": "tabs",
         "children": [
           {
-            "id": "72cf68d4e57385dd",
+            "id": "aaf8c09ac5c445a5",
             "type": "leaf",
             "state": {
               "type": "file-explorer",
               "state": {
                 "sortOrder": "alphabetical",
-                "autoReveal": true,
+                "autoReveal": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
@@ -56,7 +50,7 @@
             }
           },
           {
-            "id": "fb37543aef2c08ed",
+            "id": "9b5ebdd905b9a8af",
             "type": "leaf",
             "state": {
               "type": "search",
@@ -73,11 +67,14 @@
             }
           },
           {
-            "id": "af8fafd1491d1c23",
+            "id": "3e2d527adabb801e",
             "type": "leaf",
             "state": {
               "type": "bookmarks",
-              "state": {},
+              "state": {
+                "showSearch": false,
+                "searchQuery": ""
+              },
               "icon": "lucide-bookmark",
               "title": "Bookmarks"
             }
@@ -86,23 +83,22 @@
       }
     ],
     "direction": "horizontal",
-    "width": 300
+    "width": 493.5
   },
   "right": {
-    "id": "c12f4785ae4c1aaa",
+    "id": "b942dc5dd930d624",
     "type": "split",
     "children": [
       {
-        "id": "e566ad398dabb576",
+        "id": "7b2d08c496316679",
         "type": "tabs",
         "children": [
           {
-            "id": "9ca6ea3748772a6f",
+            "id": "cf63e182177b9733",
             "type": "leaf",
             "state": {
               "type": "backlink",
               "state": {
-                "file": "Untitled.canvas",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -112,25 +108,24 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "Backlinks for Untitled"
+              "title": "Backlinks"
             }
           },
           {
-            "id": "6a1ab570a890ad0d",
+            "id": "cab413cd91b6523c",
             "type": "leaf",
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "Untitled.canvas",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "Outgoing links from Untitled"
+              "title": "Outgoing links"
             }
           },
           {
-            "id": "bd2710b2ebcedee2",
+            "id": "da1c02d3be69143a",
             "type": "leaf",
             "state": {
               "type": "tag",
@@ -145,7 +140,7 @@
             }
           },
           {
-            "id": "104eb3c130cd2d68",
+            "id": "5bb76d7adc2c7600",
             "type": "leaf",
             "state": {
               "type": "all-properties",
@@ -159,22 +154,21 @@
             }
           },
           {
-            "id": "644f9a6b1da0c2a5",
+            "id": "93c23ed52111a40f",
             "type": "leaf",
             "state": {
               "type": "outline",
               "state": {
-                "file": "Untitled.canvas",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "Outline of Untitled"
+              "title": "Outline"
             }
           },
           {
-            "id": "42ca6488a5934cc3",
+            "id": "ceeda9d73e51edae",
             "type": "leaf",
             "state": {
               "type": "calendar",
@@ -184,17 +178,7 @@
             }
           },
           {
-            "id": "f4ac4b4f99df4d03",
-            "type": "leaf",
-            "state": {
-              "type": "claudian-view",
-              "state": {},
-              "icon": "bot",
-              "title": "Claudian"
-            }
-          },
-          {
-            "id": "5329ec009f1412c4",
+            "id": "8702f2cccd52072d",
             "type": "leaf",
             "state": {
               "type": "git-view",
@@ -202,19 +186,9 @@
               "icon": "git-pull-request",
               "title": "Source Control"
             }
-          },
-          {
-            "id": "9f993e2ca73fcd08",
-            "type": "leaf",
-            "state": {
-              "type": "smart-connections-view",
-              "state": {},
-              "icon": "smart-connections",
-              "title": "Connections"
-            }
           }
         ],
-        "currentTab": 7
+        "currentTab": 6
       }
     ],
     "direction": "horizontal",
@@ -222,6 +196,7 @@
   },
   "left-ribbon": {
     "hiddenItems": {
+      "iconic:Open rulebook": false,
       "switcher:Open quick switcher": false,
       "graph:Open graph view": false,
       "canvas:Create new canvas": false,
@@ -229,55 +204,87 @@
       "templates:Insert template": false,
       "command-palette:Open command palette": false,
       "bases:Create new base": false,
-      "obsidian-kanban:Create new board": false,
       "obsidian-git:Open Git source control": false,
-      "realclaudian:Open Claudian": false,
-      "omnisearch:Omnisearch": false,
-      "obsidian-importer:Import notes": false,
-      "smart-connections:Smart Connections: Open random connection": false,
-      "smart-connections:Smart Connections: Open connections view": false,
-      "smart-connections:Toggle Footer Connections": false
+      "obsidian-kanban:Create new board": false,
+      "beautiful-graph:Open Beautiful Graph": false,
+      "galaxy-view:Open Galaxy View": false,
+      "new-3d-graph:Open 3d graph": false
     }
   },
-  "active": "5329ec009f1412c4",
+  "floating": {
+    "id": "769e3a367c90982e",
+    "type": "floating",
+    "children": [
+      {
+        "id": "df80b9b8f675be22",
+        "type": "window",
+        "children": [
+          {
+            "id": "509d7b844c01eac7",
+            "type": "tabs",
+            "children": [
+              {
+                "id": "37a2b1208ee1cd16",
+                "type": "leaf",
+                "state": {
+                  "type": "galaxy-view",
+                  "state": {},
+                  "icon": "orbit",
+                  "title": "Galaxy view"
+                }
+              }
+            ]
+          }
+        ],
+        "direction": "vertical",
+        "x": 177,
+        "y": 23,
+        "width": 1860,
+        "height": 964,
+        "maximize": true,
+        "zoom": 0
+      }
+    ]
+  },
+  "active": "37a2b1208ee1cd16",
   "lastOpenFiles": [
-    "Tasks for surveillance.md",
-    "Market-Surveillance-Full-Plan-Doc-Refrence/Implementation-Architecture/02 - Container Architecture.md",
-    "Market-Surveillance-Full-Plan-Doc-Refrence/Implementation-Architecture/01 - Recommended Architecture.md",
-    "Market-Surveillance-Full-Plan-Doc-Refrence/Implementation-Architecture/00 - Implementation Architecture Home.md",
-    "Market-Surveillance-Full-Plan-Doc-Refrence/Detectors/DETECTOR-01.md",
-    "Market-Surveillance-Full-Plan-Doc-Refrence/Cases/CASE-001.md",
-    "Market-Surveillance/Detectors/DETECTOR-03.md",
-    "Market-Surveillance/Detectors/DETECTOR-02.md",
-    "Market-Surveillance/Detectors/DETECTOR-01.md",
-    "Market-Surveillance/Cases/CASE-001.md",
-    "Market-Surveillance-Full-Plan-Doc-Refrence/00 - Project Home.md",
-    "Market-Surveillance-Full-Plan/00%20-%20Project%20Home.md",
-    "Market-Surveillance-Full-Plan-Doc-Refrence/Implementation-Architecture/11 - Network Architecture.md",
-    "Market-Surveillance-Full-Plan-Doc-Refrence/Implementation-Architecture/12 - Deployment Options.md",
-    "Market-Surveillance-Full-Plan-Doc-Refrence/Implementation-Architecture/13 - Capacity and Hardware Sizing.md",
-    "Market-Surveillance-Full-Plan-Doc-Refrence/Implementation-Architecture/14 - HA Failure and Recovery.md",
-    "Market-Surveillance-Full-Plan-Doc-Refrence/Implementation-Architecture/15 - Performance and Hotspot Strategy.md",
-    "Market-Surveillance-Full-Plan-Doc-Refrence/Implementation-Architecture/19 - AI Future Overview.md",
-    "Market-Surveillance-Full-Plan-Doc-Refrence/Implementation-Architecture/05 - Grain Keying and State Ownership.md",
-    "Market-Surveillance-Full-Plan-Doc-Refrence/Implementation-Architecture/04 - Grain Catalog.md",
-    "Market-Surveillance-Full-Plan-Doc-Refrence/Implementation-Architecture/03 - Orleans Silo Architecture.md",
-    "Market-Surveillance-Full-Plan-Doc-Refrence/Architecture/Surveillance Detection Pipeline.md",
-    "Market-Surveillance-Full-Plan-Doc-Refrence/Architecture/Implementation Workspace Guide.md",
-    "Market-Surveillance-Full-Plan-Doc-Refrence/Architecture/Implementation%20Workspace%20Guide.md",
-    "Market-Surveillance-Full-Plan-Doc-Refrence/Implementation-Architecture/Runbooks/05 - Full Cluster Recovery.md",
-    "Market-Surveillance-Full-Plan-Doc-Refrence/Implementation-Architecture/Runbooks/04 - Sequence Gap.md",
-    "Market-Surveillance-Full-Plan-Doc-Refrence/Implementation-Architecture/Examples/docker-compose.reference.yml",
-    "Market-Surveillance-Full-Plan-Doc-Refrence/Implementation-Architecture/Coverage/540-case-coverage.csv",
-    "Market-Surveillance-Full-Plan-Doc-Refrence/Implementation-Architecture/Runbooks",
-    "Market-Surveillance-Full-Plan-Doc-Refrence/Implementation-Architecture/Examples",
-    "Market-Surveillance-Full-Plan-Doc-Refrence/Implementation-Architecture/Diagrams",
-    "Market-Surveillance-Full-Plan-Doc-Refrence/Implementation-Architecture/Coverage",
-    "Market-Surveillance-Full-Plan-Doc-Refrence/Implementation-Architecture/Archetypes",
+    "Market-Surveillance-Full-Plan-Doc-Refrence/Architecture/Implementation-Start/00 - Implementation Start Home.md",
+    "Market-Surveillance-Full-Plan-Doc-Refrence/Architecture/Implementation-Start/02 - Canonical Event Contract.md",
+    "Market-Surveillance-Full-Plan-Doc-Refrence/Architecture/Implementation-Start/01 - Global Sequence and Feed Continuity.md",
+    "Market-Surveillance-Full-Plan-Doc-Refrence/MOCs/01 - Surveillance Case Map.md",
+    "surveillance-knowledge-base/Market-Surveillance-Full-Plan-Doc-Refrence/Architecture/Surveillance Detection Pipeline.md",
+    "surveillance-knowledge-base/Market-Surveillance-Full-Plan-Doc-Refrence/Architecture/Implementation Workspace Guide.md",
+    "surveillance-knowledge-base/Market-Surveillance-Full-Plan-Doc-Refrence/Implementation-Architecture/Diagrams/02 - Container Topology.md",
+    "Market-Surveillance-Full-Plan-Doc-Refrence/DROP-Current-System/Services/Trade Enrichment Service.md",
+    "Market-Surveillance-Full-Plan-Doc-Refrence/DROP-Current-System/Services/Reference Data Cache Service.md",
+    "Market-Surveillance-Full-Plan-Doc-Refrence/DROP-Current-System/Services/Postgres Persistence Service.md",
+    "Market-Surveillance-Full-Plan-Doc-Refrence/DROP-Current-System/Services/Order Enrichment Service.md",
+    "Market-Surveillance-Full-Plan-Doc-Refrence/DROP-Current-System/Services/Oracle Persistence Service.md",
+    "Market-Surveillance-Full-Plan-Doc-Refrence/DROP-Current-System/Services/MME Drop Ingestor.md",
+    "Market-Surveillance-Full-Plan-Doc-Refrence/DROP-Current-System/Services",
+    "Market-Surveillance-Full-Plan-Doc-Refrence/DROP-Current-System/Protocol Messages/37 - AccountGroup.md",
+    "Market-Surveillance-Full-Plan-Doc-Refrence/DROP-Current-System/Protocol Messages/36 - AccountType.md",
+    "Market-Surveillance-Full-Plan-Doc-Refrence/DROP-Current-System/Protocol Messages/38 - AccountPositionUpdate.md",
+    "Market-Surveillance-Full-Plan-Doc-Refrence/DROP-Current-System/Protocol Messages/34 - Investor.md",
+    "Market-Surveillance-Full-Plan-Doc-Refrence/DROP-Current-System/Protocol Messages/35 - Custodian.md",
+    "Market-Surveillance-Full-Plan-Doc-Refrence/DROP-Current-System/Protocol Messages/33 - Account.md",
+    "Market-Surveillance-Full-Plan-Doc-Refrence/DROP-Current-System/Protocol Messages/32 - DelayedLastMatchPrice.md",
+    "Market-Surveillance-Full-Plan-Doc-Refrence/DROP-Current-System/Protocol Messages/31 - IndicativeQuoteOffer.md",
+    "Market-Surveillance-Full-Plan-Doc-Refrence/DROP-Current-System/Protocol Messages/29 - RepoOrderbookStatus.md",
+    "Market-Surveillance-Full-Plan-Doc-Refrence/DROP-Current-System/Protocol Messages/30 - IndicativeQuote.md",
+    "Market-Surveillance-Full-Plan-Doc-Refrence/DROP-Current-System/Protocol Messages/28 - AwayMarketBestBidOffer.md",
+    "Market-Surveillance-Full-Plan-Doc-Refrence/DROP-Current-System/Protocol Messages/27 - ExchangeRate.md",
+    "Market-Surveillance-Full-Plan-Doc-Refrence/DROP-Current-System/Protocol Messages/23 - OffExchangeTrade.md",
+    "Market-Surveillance-Full-Plan-Doc-Refrence/DROP-Current-System/Protocol Messages",
+    "Market-Surveillance-Full-Plan-Doc-Refrence/DROP-Current-System/Operations",
+    "Market-Surveillance-Full-Plan-Doc-Refrence/DROP-Current-System",
+    "Market-Surveillance-Full-Plan-Doc-Refrence/Architecture/Implementation-Start",
+    "surveillance-knowledge-base/Market-Surveillance-Full-Plan-Doc-Refrence/DROP-Current-System/Services",
+    "surveillance-knowledge-base/Market-Surveillance-Full-Plan-Doc-Refrence/DROP-Current-System/Protocol Messages",
+    "surveillance-knowledge-base/Market-Surveillance-Full-Plan-Doc-Refrence/DROP-Current-System/Operations",
+    "surveillance-knowledge-base/Market-Surveillance-Full-Plan-Doc-Refrence/DROP-Current-System",
     "Market-Surveillance-Full-Plan-Doc-Refrence/Templates",
-    "Market-Surveillance-Full-Plan-Doc-Refrence/Sources",
-    "Market-Surveillance-Full-Plan-Doc-Refrence/MOCs",
-    "Untitled.canvas",
-    "todos for the EGX gate app.canvas"
+    "Obsidian-Vault-Starter/10 Projects/Orleans-Rules-learning/Orleans Learning Graph.canvas",
+    "surveillance-knowledge-base/Obsidian-Vault-Starter/10 Projects/Orleans-Rules-learning/Orleans Learning Graph.canvas"
   ]
 }

@@ -1,0 +1,23 @@
+body {
+  --file-line-width: 900px;
+  --radius-s: 6px;
+  --radius-m: 10px;
+  --radius-l: 14px;
+}
+
+.markdown-rendered img {
+  border-radius: 10px;
+}
+
+.markdown-rendered pre {
+  border-radius: 10px;
+}
+
+.markdown-rendered blockquote {
+  border-radius: 0 8px 8px 0;
+}
+
+.tag {
+  border-radius: 8px;
+  padding: 2px 7px;
+}

@@ -1,3 +1,7 @@
 {
-  "cssTheme": ""
+  "cssTheme": "Border",
+  "theme": "obsidian",
+  "enabledCssSnippets": [
+    "premium-kb"
+  ]
 }

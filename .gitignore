@@ -1,1 +1,4 @@
-.smart-env
+.smart-env/
+.obsidian/plugins/*/data.json
+.obsidian/plugins/*/data.json.backup*
+.obsidian/plugins/*/diagnostics.log
