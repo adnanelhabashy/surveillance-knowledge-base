@@ -1,19 +1,24 @@
 ---
 id: IMPL-09
 type: architecture
-status: reference
+status: legacy-non-authoritative
+do_not_use_for_new_design: true
 tags:
   - surveillance/implementation
+  - archive/legacy
 ---
 
+# Kafka and Event Flow - Legacy
 
-# Kafka and Event Flow
+> [!CAUTION]
+> This note belongs to the previous implementation trial. Use [[Architecture/Implementation-Start/00 - Implementation Start Home|Implementation Start Home]] for the active design.
 
-## Topic strategy
+> [!IMPORTANT]
+> **Sequence correction:** the MME source sequence is global across message types inside its true source sequence domain. A filtered Kafka topic contains a sparse subset of that sequence. Global source gaps must therefore **not** be detected per Kafka topic, per message family or per order book. See [[Architecture/Implementation-Start/01 - Global Sequence and Feed Continuity|Global Sequence and Feed Continuity]].
 
-Keep topic count manageable. Start with domain topics, not one topic per case.
+## Historical topic strategy
 
-Suggested topics:
+The previous trial proposed domain topics rather than one topic per case:
 
 ```text
 surv.market.orders
@@ -35,32 +40,38 @@ surv.alerts.created
 surv.dlq
 ```
 
-## Partition keys
+These names are historical proposals, not current approved topic names.
 
-### Market/order topics
+## Partition keys - corrected interpretation
 
-Use `venueId|instrumentId` so the market sequence for one book stays ordered within a partition.
+For book-specific processing, `venueId|instrumentId` can be a useful partition/routing key so **events routed to one book are processed deterministically**.
 
-### Participant/reference topics
+This does **not** mean that source sequence values inside that book/topic must be contiguous.
 
-Use the natural entity key (account, beneficial owner, event id, loan id) as appropriate.
+For source feed continuity, the active design requires a complete ordered source/audit stream keyed according to the actual `SequenceDomain`.
 
 ## Delivery semantics
 
 Prefer **at-least-once transport + idempotent application processing** over pretending the entire distributed system is exactly-once.
 
-Each state owner tracks the strongest sequence/dedup identity needed for its domain.
+Each state owner tracks the strongest dedupe/application identity needed for its domain. `SourceSequence` is evidence and ordering metadata, but filtered state owners must not use `last + 1` as a global feed-gap test.
 
 ## Backpressure
 
 - Monitor consumer lag by topic/partition.
 - Pause/resume consumption when the Orleans gateway or alert pipeline exceeds defined pressure thresholds.
-- Do not allow a database outage to propagate to market ingestion; alerts remain in Kafka until the writer recovers.
+- Do not allow a database outage to propagate to market ingestion; alerts remain durable until the writer recovers.
 
 ## Replay
 
-Replay publishes the same canonical contracts with a `ReplayRunId` and controlled event-time clock. It uses a separate consumer group and replay Orleans cluster.
+Replay should preserve the same deterministic source identities and controlled event time while using an explicit replay run identifier.
 
 ## Archive
 
-Archive canonical immutable events by trading date/source/partition. Retain enough Kafka history for operational recovery; keep long-term forensic history in object storage.
+Archive canonical immutable events by trading date/source/sequence domain. Retain enough Kafka history for operational recovery and keep long-term forensic evidence according to final retention policy.
+
+## Navigation
+
+- [[Architecture/Implementation-Start/01 - Global Sequence and Feed Continuity|Global Sequence and Feed Continuity]]
+- [[Architecture/Implementation-Start/02 - Canonical Event Contract|Canonical Event Contract]]
+- [[Implementation-Architecture/00 - Implementation Architecture Home|Legacy Implementation Home]]

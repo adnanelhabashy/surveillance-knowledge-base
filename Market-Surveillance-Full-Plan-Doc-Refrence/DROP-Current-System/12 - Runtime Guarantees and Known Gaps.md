@@ -8,7 +8,7 @@ tags:
 
 # Runtime Guarantees and Known Gaps
 
-This note records **verified current behavior**, not desired future behavior.
+This note records **verified/operationally confirmed current behavior**, not desired future behavior.
 
 ## Ingestor
 
@@ -17,6 +17,16 @@ This note records **verified current behavior**, not desired future behavior.
 - If Kafka publish succeeds but Redis checkpoint write fails, a later replay can duplicate messages.
 - Pre-activation buffer capacity is 4096 messages; overflow drops messages. Upstream replay coverage for this window is not proven in the repository.
 - The current Docker service lacks a comprehensive container health check; Redis runtime status is monitoring state, not ownership/fencing.
+
+## Global sequence / surveillance coverage
+
+- The MME source sequence is treated operationally as global across message types inside its real source sequence domain.
+- Current `orders-only`, `trades-only` and `rest-messages` outputs are filtered subsets, so their source sequence values are expected to be sparse.
+- A source-sequence jump inside one filtered topic is not sufficient evidence of a feed gap.
+- Kafka provides partition-local ordering only; the current separate family topics do not establish one downstream global source order.
+- Therefore the existing filtered topics alone cannot prove complete global surveillance coverage. Surveillance needs a complete ordered source/audit stream or equivalent source-side continuity signal.
+
+See [[Architecture/Implementation-Start/01 - Global Sequence and Feed Continuity|Global Sequence and Feed Continuity]].
 
 ## Reference cache
 
