@@ -9,7 +9,7 @@ tags:
 # Surveillance Data Interface Boundary
 
 > [!IMPORTANT]
-> This note defines **what data the current DROP platform can expose to the future surveillance system**. It deliberately does **not** define Orleans grains, rules-engine design, AI models, service decomposition, or any other surveillance implementation choice.
+> This note defines **what data the current DROP platform can expose to surveillance** and the ordering evidence the surveillance implementation must preserve. It does not make the current DROP parsed topics globally ordered when they are not.
 
 ## Boundary diagram
 
@@ -22,15 +22,18 @@ flowchart LR
       CTX[mme.drop.parsed.* market/session/context]
       EO[mme.drop.enriched.orders]
       ET[mme.drop.enriched.trades]
+      FULL[Complete ordered MME source point\nbefore family filtering]
     end
+
     PO --> B[Surveillance input boundary]
     PT --> B
     REF --> B
     CTX --> B
     EO --> B
     ET --> B
-    B --> TBD[Future surveillance implementation
-TBD after business design]
+    FULL --> AUDIT[Sequence/audit stream]
+    AUDIT --> B
+    B --> SURV[Surveillance implementation]
 ```
 
 ## Data layers available today
@@ -57,8 +60,59 @@ These are derived from parsed events plus Redis reference data. They are conveni
 
 ### 4. Persistence layer
 
-Oracle and PostgreSQL retain current DROP outputs for replay/investigation purposes, but the live surveillance input should be defined separately from database persistence concerns.
+Oracle and PostgreSQL retain current DROP outputs for replay/investigation purposes, but live surveillance ordering must not depend on database persistence.
 
-## Recommended business requirement for the future interface
+## Global MME sequence - corrected model
 
-When the new surveillance implementation is designed, its input contract should explicitly state which of the above topic groups are authoritative evidence, which are derived convenience views, and how event identity / ordering / replay is preserved. That is a future design decision, not assumed here.
+Operationally, the MME sequence used by this platform is **global across message types within its real source sequence domain**.
+
+Therefore:
+
+- `orders`, `trades`, `reference`, BBO and session topics each contain only a **sparse subset** of the source sequence.
+- Seeing source sequence `1000` and then `1004` on `mme.drop.parsed.orders` does **not** prove messages `1001..1003` were lost; they may belong to other message types/topics.
+- A downstream consumer must **never detect source feed gaps independently per Kafka topic or per message family**.
+- Kafka preserves order only inside a partition; it does not provide a global ordering relationship across separate topics.
+- The exact `SequenceDomain` must represent the source scope that owns the global sequence. It must never be derived from Kafka topic, message family, trader or order book.
+
+See [[Architecture/Implementation-Start/01 - Global Sequence and Feed Continuity|Global Sequence and Feed Continuity]].
+
+## Required surveillance-safe addition
+
+For reliable feed coverage, surveillance needs a lightweight ordered stream produced at the first point where the **complete source message sequence** exists, before family filtering destroys contiguity.
+
+Preferred contract/topic:
+
+`surv.feed.audit.v1`
+
+One record for every source message should preserve at least:
+
+- `SourceSequence`
+- `SequenceDomain`
+- `EventType` / DROP message identity
+- `MessageGroup`
+- `MessageId`
+- source/DROP partition identifier when present
+- `EventTime`
+- deterministic `EventId`
+
+This audit stream is for **coverage and forensic ordering**. The existing parsed/enriched topics remain the business payload inputs.
+
+> [!NOTE]
+> If an existing current component already exposes every MME message in exact source order, that existing stream can satisfy this requirement instead of adding a duplicate stream. The requirement is the complete ordered sequence, not a particular topic name.
+
+## Surveillance input rule
+
+The active implementation should use:
+
+1. the complete sequence/audit stream for feed continuity and coverage state;
+2. parsed business topics for authoritative market events;
+3. reference topics for identity/instrument state;
+4. enriched topics only as convenience views or cross-checks;
+5. Kafka coordinates + source sequence in alert evidence for reproducibility.
+
+## Navigation
+
+- [[DROP-Current-System/03 - Current DROP Runtime Architecture|Current DROP Runtime Architecture]]
+- [[Architecture/Implementation-Start/00 - Implementation Start Home|Implementation Start Home]]
+- [[Architecture/Implementation-Start/02 - Canonical Event Contract|Canonical Event Contract]]
+- [[00 - Project Home|Project Home]]
