@@ -11,11 +11,11 @@ tags:
 
 ## Goal
 
-Build one complete, testable path from DROP evidence to surveillance alert before expanding to hundreds of cases.
+Build one complete path from **current DROP evidence -> globally ordered canonical events -> Orleans state -> reusable detector facts -> reproducible alert** before expanding toward all 540 cases.
 
 ## First cases
 
-Start with closely related order-book manipulation scenarios:
+Start with order-book manipulation because current DROP provides the strongest required event coverage:
 
 - [[Cases/CASE-001|Spoofing]]
 - [[Cases/CASE-002|Layering]]
@@ -25,62 +25,98 @@ Start with closely related order-book manipulation scenarios:
 - [[Cases/CASE-028|Phantom Liquidity]]
 - [[Cases/CASE-030|Order-Book Imbalance Manipulation]]
 
-They reuse the same state and detector family, so they give high architectural value without building unrelated domains too early.
-
 ## End-to-end slice
 
 ```mermaid
 flowchart LR
-    A[Complete MME audit sequence] --> F[FeedContinuityWorker]
-    F --> C[CoverageState]
+    K[Current DROP Kafka topics] --> COL[DropSourceCollector]
+    R[Ingestor checkpoints + health] --> WM[Safe Watermark]
+    COL --> ASM[DropSourceAssembler]
+    WM --> ASM
 
-    O[Orders] --> D[Dispatcher]
-    T[Trades] --> D
-    B[BBO / market state] --> D
-    R[Reference identity] --> D
+    ASM --> C[surv.drop.canonical.v1]
+    ASM --> CV[surv.coverage.v1]
+
+    C --> REF[ReferenceStateProjector]
+    C --> D[KeyedMarketDispatcher]
+    REF --> D
 
     D --> G[OrderBookGrain]
     G --> X[Order-book detectors]
-    C --> X
+    CV --> X
     X --> FB[FactBundle]
     FB --> RR[Candidate Rule Router]
     RR --> RE[RulesEngine]
     RE --> AL[Alert Event]
-    AL --> DB[(Alert store)]
 ```
 
-## Phase 1 - prove source correctness
+## Phase 0 - prove source assembly
 
-Deliver:
-
-- canonical envelope;
-- deterministic `EventId`;
-- `SequenceDomain` handling;
-- complete sequence/audit consumer;
-- real gap detection;
-- duplicate/replay handling;
-- exact Kafka coordinates in evidence.
-
-Acceptance examples:
+Before detector coding depends on exact source ordering, prove:
 
 ```text
-audit: 1000,1001,1002,1003 -> no gap
-audit: 1000,1001,1004      -> gap 1002..1003
-orders: 1000,1004           -> NOT a global gap
+mme-sequence-number exists on all required source records
+Kafka DROP headers agree with payload
+orders/trades/rest/reference + source-quality topics can be assembled deterministically
+replay duplicates are deduped
+sequence epoch/reset behavior is known
+safe watermark does not create false gaps
 ```
 
-## Phase 2 - reconstruct one live order book
+Detailed design: [[09 - Source Assembly and Ordering Logic|Source Assembly and Ordering Logic]].
+
+## Phase 1 - canonical source model
 
 Deliver:
 
-- `OrderBookGrain` keyed by `venueId|instrumentId`;
-- new/modify/cancel lifecycle;
-- trade application where source data supports association;
-- best bid/ask and depth levels;
-- book consistency checks;
-- deterministic replay test producing the same final book.
+- `DropEventEnvelope<T>`;
+- all 37 official DROP payload adapters;
+- deterministic `EventId`;
+- `SequenceDomain` + `SequenceEpoch`;
+- transaction/business-date context;
+- globally ordered `surv.feed.audit.v1` and `surv.drop.canonical.v1`;
+- source-quality and coverage topics;
+- exact source + Kafka evidence coordinates.
 
-## Phase 3 - first reusable detector facts
+Event definitions: [[07 - Complete Surveillance Event Catalog|Complete Surveillance Event Catalog]].
+
+## Phase 2 - reference state
+
+Deliver versioned/as-of projection for:
+
+```text
+Participant
+Actor
+Asset
+OrderBook
+Account
+AccountType
+AccountGroup
+Investor
+Custodian
+CorporateAction
+```
+
+Use source sequence for historical resolution. Do not rely on today's Redis value during replay.
+
+See [[10 - Reference State and Enrichment Strategy|Reference State and Enrichment Strategy]].
+
+## Phase 3 - reconstruct one live order book
+
+Deliver:
+
+- `OrderBookGrain` keyed by `venueId|orderBookId`;
+- full native Order lifecycle application;
+- best bid/ask and depth levels;
+- trade application where protocol relationships permit;
+- BBO cross-checks;
+- market/session context;
+- book consistency issues;
+- deterministic replay producing the same final book.
+
+Important: book sequence values are sparse globally; never require `last + 1` inside the grain.
+
+## Phase 4 - first reusable detectors
 
 Implement:
 
@@ -94,28 +130,29 @@ Implement:
 
 Detailed starting specs: [[06 - First Detector Specifications|First Detector Specifications]].
 
-## Phase 4 - candidate routing + rules
+## Phase 5 - candidate routing + rules
 
-Do not run all 540 cases for each event.
-
-Starter routing:
+Do not execute all 540 rules for every event.
 
 ```text
-Order New/Modify/Cancel
+Order lifecycle
   -> spoof/layer
   -> book pressure
   -> cancellation/lifetime
   -> message burst
 
-Trade
+Trade / MatchedTrade
   -> opposite-side execution
   -> price impact
-  -> spoof-and-trade/layer-and-trade
+  -> wash/matched candidates later
+
+Auction/market state
+  -> auction manipulation packs later
 ```
 
-Rules should consume immutable typed facts, not reach into grain internals.
+Rules consume immutable facts, not grain internals.
 
-## Phase 5 - alert evidence
+## Phase 6 - alert evidence
 
 Minimum alert evidence:
 
@@ -124,46 +161,66 @@ AlertId
 CaseId
 RuleVersion
 DetectorVersion
+ThresholdProfileVersion
 SubjectIds
-VenueId / InstrumentId
+VenueId / OrderBookId / InstrumentId
 WindowStart / WindowEnd
 Score / Severity
-Source event ids
-SourceSequenceMin / SourceSequenceMax
-Kafka topic/partition/offset evidence
+Source EventIds
+MME sequence range/list
+Original Kafka topic/partition/offset evidence
 CoverageEpoch / CoverageDegraded
+DataDomain availability
 Evidence summary
 ReplayRunId?
 ```
 
-## Phase 6 - replay tests
+## Phase 7 - replay tests
 
-For every seeded case, maintain:
+For each seeded case maintain:
 
-- positive deterministic scenario;
-- negative/normal scenario;
+- positive scenario;
+- normal/negative scenario;
 - boundary scenario;
-- duplicate-input scenario;
-- source-gap/degraded-coverage scenario;
-- out-of-order/replay scenario where applicable.
+- duplicate source delivery scenario;
+- delayed family source scenario;
+- confirmed source-gap scenario;
+- reference update/replay scenario.
 
-The same input replay must produce the same facts and alert result for the same rule/detector versions.
+Same canonical input + same versions must produce the same facts and alert result.
 
-## Definition of done for the first slice
+## Definition of done
 
-- real global gaps detected only from complete source sequence;
-- one instrument order book reconstructs correctly;
+- exact source assembly is proven against the current three-ingestor topology;
+- no false gaps are produced from sparse per-topic sequences;
+- all first-slice source events retain forensic identity;
+- one order book reconstructs deterministically;
 - first detector facts are explainable;
-- spoofing/layering candidate alerts are reproducible;
-- alerts show exact evidence and coverage state;
-- duplicate Kafka delivery does not double-apply state;
-- replay produces the same result;
+- spoof/layer candidates are reproducible;
+- alerts expose coverage state;
+- replay duplicates do not double-apply state;
 - no DB/network call blocks the `OrderBookGrain` hot path.
+
+## Expansion after the first slice
+
+Next expand by event-domain strength:
+
+```text
+wash/self/matched trading
+price/volume/tape manipulation
+auction/open/close manipulation
+position/concentration patterns
+related-account patterns
+then external-domain-dependent cases
+```
+
+See [[12 - Case Family Event Coverage Matrix|Case Family Event Coverage Matrix]].
 
 ## Navigation
 
 - [[00 - Implementation Start Home|Implementation Start Home]]
+- [[07 - Complete Surveillance Event Catalog|Complete Surveillance Event Catalog]]
+- [[09 - Source Assembly and Ordering Logic|Source Assembly and Ordering Logic]]
 - [[03 - Order Book Surveillance Core|Order Book Surveillance Core]]
 - [[05 - Dotnet Solution Starting Structure|.NET Solution Starting Structure]]
-- [[06 - First Detector Specifications|First Detector Specifications]]
-- [[MOCs/01 - Surveillance Case Map|Surveillance Case Map]]
+- [[12 - Case Family Event Coverage Matrix|Case Family Event Coverage Matrix]]
