@@ -8,6 +8,9 @@ tags:
 
 # Current DROP System Map
 
+> [!NOTE]
+> This MOC maps the **existing DROP source platform**. For THE EYE's current surveillance runtime, continue to [[MOCs/05 - Current THE EYE Architecture Map|Current THE EYE Architecture Map]].
+
 ```mermaid
 flowchart TB
     H[[DROP-Current-System/00 - Current DROP System Home]]
@@ -26,13 +29,27 @@ flowchart TB
     HA[[DROP-Current-System/13 - Current Capacity HA and Deployment Baseline]]
     T[[DROP-Current-System/14 - Proposed DROP HA and Hardware Target]]
     S[[DROP-Current-System/15 - Source Classification and Reliability]]
+    EYE[[MOCs/05 - Current THE EYE Architecture Map]]
+
     H --> P & M & A & E & D & I & L & K & R & DB & AF & G & HA & T & S
+    I --> EYE
 ```
 
 ## Business path
 
-[[DROP-Current-System/02 - DROP Message Catalog|Message catalog]] -> [[DROP-Current-System/04 - Entity and Identity Model|identity model]] -> [[DROP-Current-System/05 - Business Data Dictionary and Join Keys|join keys]] -> [[DROP-Current-System/06 - Surveillance Data Interface Boundary|surveillance input boundary]].
+[[DROP-Current-System/02 - DROP Message Catalog|Message catalog]] -> [[DROP-Current-System/04 - Entity and Identity Model|identity model]] -> [[DROP-Current-System/05 - Business Data Dictionary and Join Keys|join keys]] -> [[DROP-Current-System/06 - Surveillance Data Interface Boundary|surveillance input boundary]] -> [[MOCs/05 - Current THE EYE Architecture Map|THE EYE architecture]].
 
 ## Platform path
 
 [[DROP-Current-System/03 - Current DROP Runtime Architecture|runtime architecture]] -> [[DROP-Current-System/08 - Kafka Topic Catalog|Kafka]] / [[DROP-Current-System/09 - Redis State and Reference Cache|Redis]] / [[DROP-Current-System/10 - Persistence and Database Model|DB]] -> [[DROP-Current-System/11 - Airflow Orchestration|Airflow]] -> [[DROP-Current-System/12 - Runtime Guarantees and Known Gaps|reliability gaps]].
+
+## THE EYE boundary
+
+```text
+current DROP Kafka outputs
+→ TheEye.Ingestion (+ SourceAssembly library)
+→ surv.drop.canonical.v1
+→ TheEye.Silo
+```
+
+See [[Architecture/Implementation-Start/15 - Current Runtime Architecture and Fix Plan|Current Runtime Architecture and Fix Plan]].
