@@ -55,6 +55,15 @@ The jumps above are normal filtering, not feed gaps.
 
 For the surveillance starting baseline, see [[Architecture/Implementation-Start/01 - Global Sequence and Feed Continuity|Global Sequence and Feed Continuity]].
 
+## Kafka sequence header encoding status
+
+The current vault establishes that MME sequencing metadata is transported separately from the DROP payload, but this service note does **not** establish the byte encoding of the Kafka header `mme-sequence-number`.
+
+Do not infer its encoding from the DROP protocol's little-endian payload rule, and do not assume big-endian or little-endian until the current producer implementation or real Kafka header bytes are verified.
+
+Phase-0 verification procedure and acceptance criteria:
+[[Architecture/Implementation-Start/15 - MME Sequence Header Encoding Verification|MME Sequence Header Encoding Verification]].
+
 ## Outputs
 
 [[DROP-Current-System/08 - Kafka Topic Catalog|Kafka Topic Catalog]]

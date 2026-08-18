@@ -60,7 +60,10 @@ drop-message-id
 drop-group-id
 ```
 
-Keep these concepts separate:
+> [!IMPORTANT]
+> The current vault does **not** verify the byte encoding of the Kafka header `mme-sequence-number`. The DROP protocol's little-endian rule applies to the binary DROP payload and must not be used as proof of this Kafka header's encoding. Do not assume big-endian or little-endian until Phase 0 verifies the current producer implementation or real Kafka header bytes. See [[15 - MME Sequence Header Encoding Verification|MME Sequence Header Encoding Verification]].
+
+So THE EYE must keep these concepts separate:
 
 ```text
 MmeSequenceNumber                  -> source ordering evidence
@@ -318,3 +321,4 @@ Before production Silo logic depends on exact ordering, prove:
 - [[08 - DROP Event Acquisition Matrix|DROP Event Acquisition Matrix]]
 - [[09 - Source Assembly and Ordering Logic|Source Assembly and Ordering Logic]]
 - [[14 - Data Quality and Capability Gaps|Data Quality and Capability Gaps]]
+- [[15 - MME Sequence Header Encoding Verification|MME Sequence Header Encoding Verification]]
