@@ -10,11 +10,16 @@ tags:
 
 # Reference State and Enrichment Strategy
 
+> [!IMPORTANT]
+> Reference projection and Account → Investor resolution are **Silo-side responsibilities**. `TheEye.Ingestion` transports the native reference events through `surv.drop.canonical.v1`; it does not query Redis to enrich Orders/Trades.
+
+See [[15 - Current Runtime Architecture and Fix Plan|Current Runtime Architecture and Fix Plan]].
+
 ## Why THE EYE needs its own reference projection
 
-The current DROP platform already has `ReferenceDataCacheService` and Redis hashes, but surveillance needs **historically reproducible as-of identity resolution**.
+The current DROP platform has `ReferenceDataCacheService` and Redis hashes, but surveillance needs historically reproducible **as-of source-sequence identity resolution**.
 
-The official protocol flow is:
+Protocol flow:
 
 ```text
 initial reference publication
@@ -23,14 +28,38 @@ EndOfReferenceData
     ↓
 real-time messages
     ↓
-reference updates may still occur at any time
+reference updates may still occur later
 ```
 
-Therefore reference data is not a one-time startup lookup.
+Reference data is therefore versioned state, not one startup lookup.
 
-## Authoritative inputs
+## Runtime ownership
 
-Consume these source events directly through the canonical source stream:
+```mermaid
+flowchart LR
+    DROP[raw DROP reference topics] --> ING[TheEye.Ingestion]
+    ING --> CAN[surv.drop.canonical.v1]
+    CAN --> REF[ReferenceStateProjector in TheEye.Silo]
+    REF --> CACHE[as-of reference state / local snapshot]
+    CACHE --> DISP[dispatcher / grains / detectors]
+```
+
+### Ingestor owns
+
+- source adaptation/validation/order;
+- publishing `InvestorReferenceEvent`, `AccountReferenceEvent`, `ActorReferenceEvent`, etc. unchanged in business meaning.
+
+### Silo owns
+
+- applying reference actions;
+- versioning as-of source sequence;
+- Account → Investor resolution;
+- resolved Order/Trade context;
+- readiness/degraded reference state.
+
+## Authoritative canonical reference inputs
+
+Consume from `surv.drop.canonical.v1`:
 
 ```text
 ParticipantReferenceEvent
@@ -49,11 +78,39 @@ InitialBusinessDateEvent
 AccountPositionEvent
 ```
 
-Current topic mappings are in [[08 - DROP Event Acquisition Matrix|DROP Event Acquisition Matrix]].
+## Investor source semantics
+
+The official DROP Investor source message is message group `31`, message ID `34` and carries its native Investor identity/status/action fields.
+
+The Ingestor publishes this as an independent canonical reference event.
+
+The official Account source message is message ID `33` and carries the important Account relationships including:
+
+```text
+accountId
+externalAccount
+accountTypeId
+investorId
+participantId
+```
+
+That gives the Silo the critical identity path:
+
+```text
+Order / Trade account
+        ↓
+Account reference version as-of source sequence
+        ↓
+InvestorId
+        ↓
+Investor reference/state
+```
+
+This join must **not** move into `TheEye.Ingestion`.
 
 ## Current Redis cache - role in THE EYE
 
-Current keys include:
+Current keys may include:
 
 ```text
 asset:{id}
@@ -70,17 +127,15 @@ exchangerate:{currency}
 accountpos:{asset}:{participant}:{account}:{investor}
 ```
 
-THE EYE may use current Redis for diagnostics or optional fast bootstrap, but must not treat today's Redis values as the only forensic truth because:
+THE EYE may use current Redis for diagnostics or an explicitly validated bootstrap optimization, but never as the only forensic truth because Redis is mutable latest state.
 
-- Redis contains mutable latest state;
-- replay/historical analysis needs the value valid at the historical source sequence;
-- current reference consumer failure/restart semantics are not a complete historical version store.
+Replay/historical evaluation must reconstruct the reference state valid at the historical source sequence.
 
 ## ReferenceStateProjector
 
-Build a surveillance-owned projector from canonical reference events.
+Build this in/with `TheEye.Silo` from canonical reference events.
 
-Conceptual key/value:
+Conceptual version model:
 
 ```text
 ReferenceEntityKey
@@ -96,23 +151,21 @@ ReferenceVersion
 - NormalizedFields
 ```
 
-For hot processing, keep current/latest values in memory/Orleans/local cache. For replay/forensics, retain version history in a durable projection store or rebuild from `surv.drop.canonical.v1`.
+For hot processing, keep latest immutable snapshots locally/in Orleans/cache. For replay/forensics, retain version history in a durable projection store or rebuild from canonical history.
 
 ## Action semantics
 
-Several reference messages carry an `action` such as create/update/delete.
-
-The projector should apply the source action exactly and keep tombstones/version history instead of physically forgetting that the entity once existed.
+Apply native source actions exactly:
 
 ```text
-Create -> new version
-Update -> close previous version + open new version
-Delete -> close previous version + tombstone
+Create -> open first version
+Update -> close prior version + open new version
+Delete -> close prior version + tombstone
 ```
 
-## Core identity graph
+Do not physically erase historical meaning.
 
-Starting relationships from DROP:
+## Core identity graph
 
 ```mermaid
 flowchart LR
@@ -129,32 +182,30 @@ flowchart LR
     PARTICIPANT --> ORDER
 ```
 
-Preserve raw IDs even after names/descriptions are resolved.
+Preserve raw source IDs after names/classifications are resolved.
 
 ## As-of resolution
 
-For a market event with source sequence `S`:
+For a market event at source sequence `S`:
 
 ```text
-resolve entity version where
+resolve version where
 ValidFromSourceSequence <= S
 and (ValidToSourceSequence is null or S < ValidToSourceSequence)
 ```
 
-This prevents a later participant/account/instrument update from changing the interpretation of an older alert during replay.
+This prevents a later account/investor/participant update from rewriting the interpretation of an older alert during replay.
 
-## Order enrichment - recommended surveillance model
+## Order resolution - Silo model
 
-Current `mme.drop.enriched.orders` is not authoritative for THE EYE because current Redis lookup failures can publish degraded/missing fields and replay can duplicate output.
-
-Use:
+Authoritative path:
 
 ```text
-OrderLifecycleEvent
+canonical OrderLifecycleEvent
       +
-ReferenceState as-of SourceSequence
+Silo ReferenceState as-of SourceSequence
       ↓
-ResolvedOrderEvent
+ResolvedOrderEvent / resolved processing context
 ```
 
 Suggested resolved context:
@@ -167,61 +218,47 @@ account
 accountType
 investor
 custodian when available
-instrument product/classification
+instrument classification
 session/market context
 ```
 
-Keep both:
+Keep both raw source IDs and resolved business context.
+
+The current `mme.drop.enriched.orders` may be used as a comparison view, not authoritative evidence.
+
+## Trade resolution/pairing - Silo model
 
 ```text
-Raw source IDs
-Resolved names/classifications
-```
-
-Never replace the raw IDs with only resolved text.
-
-## Trade enrichment/pairing - recommended surveillance model
-
-Current `mme.drop.enriched.trades` can be useful as a comparison view but the current Redis pending-list flow has documented duplicate/race windows.
-
-THE EYE should derive:
-
-```text
-TradeSideEvent
-      ↓ matchId pairing
+canonical TradeSideEvent
+      ↓
+TradePairProjector by matchId
+      ↓
 MatchedTradeEvent
-      ↓ as-of reference resolution
-ResolvedTradeEvent
+      ↓
+ReferenceState as-of source sequence
+      ↓
+ResolvedTradeEvent / resolved processing context
 ```
 
-The individual source trade sides remain evidence even after pairing.
+The individual canonical trade sides remain source evidence.
 
-## Beneficial owner meaning
+Current `mme.drop.enriched.trades` may be used only as an optional cross-check because the existing enrichment/pending-list path has known replay/race concerns.
 
-DROP provides an `Investor` entity and Account -> Investor relationship. Treat this as the **DROP-provided investor identity**.
+## Beneficial-owner meaning
 
-Do not automatically claim it is the complete legal beneficial-ownership graph required for every nominee/related-party surveillance case.
+DROP supplies an `Investor` entity and Account → Investor relationship. Treat this as the **DROP-provided investor identity**.
 
-For wider relationship surveillance, merge additional KYC/ownership data through `BeneficialOwnershipRelationshipEvent` from [[11 - External Event Contracts|External Event Contracts]].
+Do not automatically claim it is the complete legal beneficial-ownership graph for all nominee/related-party cases.
+
+Wider relationships come through validated KYC/ownership external events.
 
 ## Instrument relationships
 
-DROP `Asset` and `OrderBook` provide strong instrument/product attributes including option/repo-related fields.
-
-For cross-product surveillance, derive what can be proven from DROP, but use external `InstrumentRelationshipEvent` when full relationships such as these are not present:
-
-```text
-option -> underlying
-future -> underlying
-ETF -> basket constituents
-index -> constituents/weights
-depositary receipt -> underlying
-related cash/derivative instruments
-```
+DROP `Asset` and `OrderBook` provide useful instrument/product attributes. Full cross-product relationship graphs may still require external `InstrumentRelationshipEvent` data.
 
 ## Session and market context
 
-Keep market/session state separately from static reference:
+Keep dynamic market/session context in separate Silo-side projectors:
 
 ```text
 SessionChangeEvent
@@ -233,94 +270,61 @@ EquilibriumPriceEvent
 BusinessDateChangedEvent
 ```
 
-A detector asks for explicit context as-of event sequence/time; it should not query mutable infrastructure directly.
+Detectors consume explicit projected context; they do not query mutable Redis/Kafka directly.
 
 ## Position state
 
-`AccountPositionUpdate` provides available long/loan quantities for asset/participant/account/investor.
+`AccountPositionUpdate` supplies available long/loan quantities by asset/participant/account/investor.
 
-Use it as one position/availability input:
-
-```text
-AccountPositionState
-- AssetId
-- ParticipantId
-- AccountId/Name
-- InvestorId
-- AvailableLongQty
-- AvailableLoanQty
-- EffectiveSourceSequence
-```
-
-Do not silently equate it to:
-
-- full settled holdings history;
-- all open obligations;
-- all borrowed securities;
-- all regulatory position-limit calculations.
-
-Those may require external settlement/lending/position sources.
+Use it according to its documented meaning. Do not silently equate it with full settled holdings, all obligations, all borrowed securities or regulatory position-limit calculations.
 
 ## Reference readiness
 
-Starting state machine:
+Silo-side state machine:
 
 ```mermaid
 stateDiagram-v2
     [*] --> LoadingReference
     LoadingReference --> ReferenceReady: EndOfReferenceData
     ReferenceReady --> ReferenceReady: later reference update
-    LoadingReference --> Degraded: missing/invalid reference source
-    ReferenceReady --> Degraded: reference processing failure
+    LoadingReference --> Degraded: missing/invalid required reference source
+    ReferenceReady --> Degraded: reference projection failure
     Degraded --> ReferenceReady: replay/rebuild confirmed
 ```
 
-Business processing can be configured to wait for `ReferenceReady` on live startup, matching the protocol's initial-reference-before-real-time contract.
-
-## Cache design
-
-Keep the hot lookup simple:
+## Hot cache design
 
 ```text
 ReferenceSnapshotCache
-- latest entity versions
-- immutable value objects
-- keyed by numeric source ID
-- no network call from OrderBookGrain hot path
+- latest immutable entity versions
+- keyed by source IDs / natural lookup keys
+- local to the surveillance runtime
+- no remote network lookup from OrderBookGrain hot path
 ```
 
-A background projector updates the cache; grains receive already-resolved context or a local immutable snapshot service.
+A background/projector path updates it in canonical source order.
 
 ## Replay
-
-Replay must rebuild reference state from the same source sequence before applying dependent business events.
 
 Correct:
 
 ```text
-source seq 100 Participant update
-source seq 101 Account update
-source seq 102 Order
-=> Order resolves reference state after 100/101
+seq 100 Investor/Participant update
+seq 101 Account update
+seq 102 Order
+=> Order resolves state after seq 100/101
 ```
 
 Incorrect:
 
 ```text
-replay source seq 102 Order
-=> look up today's Redis value
+replay seq 102 Order
+=> look up today's Redis values
 ```
-
-## Source basis
-
-- [[DROP-Current-System/01 - DROP Protocol Overview|DROP Protocol Overview]]
-- [[DROP-Current-System/04 - Entity and Identity Model|Entity and Identity Model]]
-- [[DROP-Current-System/05 - Business Data Dictionary and Join Keys|Business Data Dictionary and Join Keys]]
-- [[DROP-Current-System/08 - Kafka Topic Catalog|Kafka Topic Catalog]]
-- [[DROP-Current-System/12 - Runtime Guarantees and Known Gaps|Runtime Guarantees and Known Gaps]]
 
 ## Navigation
 
+- [[15 - Current Runtime Architecture and Fix Plan|Current Runtime Architecture and Fix Plan]]
 - [[07 - Complete Surveillance Event Catalog|Complete Surveillance Event Catalog]]
 - [[08 - DROP Event Acquisition Matrix|DROP Event Acquisition Matrix]]
 - [[09 - Source Assembly and Ordering Logic|Source Assembly and Ordering Logic]]
