@@ -10,204 +10,228 @@ tags:
 
 # Event Processing Blocks
 
-## Full starting flow
+> [!IMPORTANT]
+> Deployment ownership has changed from the earlier diagram. Blocks 1–3 run inside **one `TheEye.Ingestion` deployable**. Blocks 4–13 are Silo/downstream surveillance responsibilities. Kafka `surv.drop.canonical.v1` is the hard boundary.
+
+See [[15 - Current Runtime Architecture and Fix Plan|Current Runtime Architecture and Fix Plan]].
+
+## Full current flow
 
 ```mermaid
 flowchart TB
-    subgraph CURRENT[Current DROP Platform - unchanged]
+    subgraph CURRENT[Existing DROP Platform - unchanged]
         EGX[EGX MME DROP / SoupBinTCP]
         IO[orders-only ingestor]
         IT[trades-only ingestor]
         IR[rest-messages ingestor]
-        K[(Current Kafka)]
-        RK[(Redis sequence/health + reference cache)]
+        K[(Current Kafka mme.drop.*)]
+        RK[(Redis checkpoints + health)]
         EGX --> IO & IT & IR
-        IO --> K
-        IT --> K
-        IR --> K
+        IO & IT & IR --> K
         IO & IT & IR --> RK
     end
 
-    subgraph SOURCE[THE EYE - Source Integrity Layer]
-        COL[DropSourceCollector]
-        WM[IngestorWatermarkReader]
-        BUF[SourceSequenceBuffer]
-        ASM[DropSourceAssembler]
-        AUDIT[surv.feed.audit.v1]
-        CANON[surv.drop.canonical.v1]
-        COVER[surv.coverage.v1]
-        DQ[surv.dataquality.v1]
+    subgraph ING[TheEye.Ingestion - one deployable]
+        COL[1. DropSourceCollector + source context/adapters]
+        WM[2. IngestorWatermarkReader]
+        BUF[3a. SourceSequenceBuffer]
+        ASM[3b. DropSourceAssembler]
+        COL --> BUF --> ASM
+        WM --> ASM
     end
 
     K --> COL
     RK --> WM
-    COL --> BUF
-    WM --> BUF
-    BUF --> ASM
-    ASM --> AUDIT
-    ASM --> CANON
-    ASM --> COVER
-    ASM --> DQ
 
-    subgraph CONTEXT[THE EYE - Context/Projection Layer]
-        REF[ReferenceStateProjector]
-        TX[TransactionContextProjector]
-        MARKET[MarketStateProjector]
-        PAIR[TradePairProjector]
-        EXT[External Source Adapters]
+    ASM --> AUDIT[(surv.feed.audit.v1)]
+    ASM --> CANON[(surv.drop.canonical.v1)]
+    ASM --> COVER[(surv.coverage.v1)]
+    ASM --> DQ[(surv.dataquality.v1)]
+
+    subgraph SILO[TheEye.Silo - Phase B surveillance runtime]
+        CON[Canonical consumer]
+
+        subgraph CONTEXT[Projection / Context]
+            REF[4. ReferenceStateProjector]
+            TX[5. Transaction + BusinessDate Projectors]
+            MARKET[6. MarketStateProjector]
+            PAIR[7. TradePairProjector]
+            EXT[8. External Source Adapters / external topics]
+        end
+
+        subgraph DISPATCH[Ordered Dispatch]
+            DISP[9. KeyedMarketDispatcher]
+            SUBJ[SubjectDispatcher]
+        end
+
+        subgraph ORLEANS[10. Orleans State]
+            BOOK[OrderBookGrain]
+            TRADER[TraderGrain]
+            ACCOUNT[AccountGrain]
+            INVESTOR[Investor state]
+            POSITION[PositionGrain]
+            REL[RelationshipGrain]
+            AUCTION[Auction state]
+            COV[CoverageStateGrain]
+        end
+
+        subgraph DETECTION[Detection / Rules]
+            DET[11. Reusable .NET Detectors]
+            FACT[FactBundle]
+            ROUTER[12. Candidate Rule Router]
+            RULE[13. RulesEngine]
+            CORR[Alert Correlation]
+            ALERT[surv.alerts.created]
+        end
+
+        CON --> REF & TX & MARKET & PAIR
+        CON --> DISP
+        REF & TX & MARKET & PAIR --> DISP
+        EXT --> SUBJ
+        DISP --> BOOK & TRADER & ACCOUNT & INVESTOR & POSITION & AUCTION
+        SUBJ --> REL
+        BOOK & TRADER & ACCOUNT & INVESTOR & POSITION & REL & AUCTION & COV --> DET
+        DET --> FACT --> ROUTER --> RULE --> CORR --> ALERT
     end
 
-    CANON --> REF
-    CANON --> TX
-    CANON --> MARKET
-    CANON --> PAIR
-    EXT --> XTOPIC[surv.external.*]
-
-    subgraph DISPATCH[THE EYE - Ordered Dispatch]
-        DISP[KeyedMarketDispatcher]
-        SUBJ[SubjectDispatcher]
-    end
-
-    CANON --> DISP
-    XTOPIC --> SUBJ
-    REF --> DISP
-    MARKET --> DISP
-    PAIR --> DISP
-
-    subgraph ORLEANS[THE EYE - Orleans State]
-        BOOK[OrderBookGrain]
-        TRADER[TraderGrain]
-        ACCOUNT[AccountGrain]
-        INVESTOR[Investor/BeneficialOwner state]
-        POSITION[PositionGrain]
-        REL[RelationshipGrain]
-        AUCTION[Auction state]
-        COV[CoverageStateGrain]
-    end
-
-    DISP --> BOOK
-    DISP --> TRADER
-    DISP --> ACCOUNT
-    DISP --> INVESTOR
-    DISP --> POSITION
-    DISP --> AUCTION
-    SUBJ --> REL
+    CANON --> CON
     COVER --> COV
-
-    subgraph DETECTION[THE EYE - Detection/Rules]
-        DET[Reusable .NET Detectors]
-        FACT[FactBundle]
-        ROUTER[Candidate Rule Router]
-        RULE[RulesEngine]
-        CORR[Alert Correlation]
-        ALERT[surv.alerts.created]
-    end
-
-    BOOK --> DET
-    TRADER --> DET
-    ACCOUNT --> DET
-    POSITION --> DET
-    REL --> DET
-    AUCTION --> DET
-    COV --> DET
-    DET --> FACT
-    FACT --> ROUTER
-    ROUTER --> RULE
-    RULE --> CORR
-    CORR --> ALERT
 ```
 
-## Block 1 - DropSourceCollector
+## Block 1 - Source collection/context/adapters
 
-### Inputs
+**Runs inside `TheEye.Ingestion`.**
 
-All authoritative current DROP source topics from [[08 - DROP Event Acquisition Matrix|DROP Event Acquisition Matrix]], plus source-quality topics:
+Inputs: documented current `mme.drop.*` topics that actually exist after broker topic reconciliation.
 
-```text
-mme.drop.parsed.unhandled
-mme.drop.raw.messages.dlq
-```
+Responsibilities:
 
-### Responsibilities
+- consume with `theeye-source-assembly-v1`;
+- keep exact Kafka coordinates;
+- decode the existing MME application's Kafka header encoding;
+- map through the typed DROP adapter;
+- validate header/payload identity;
+- quarantine malformed/lying records;
+- push valid records to source-sequence assembly.
 
-- consume with a dedicated surveillance consumer group;
-- copy exact Kafka coordinates;
-- read source headers;
-- deserialize without changing source meaning;
-- push records into sequence assembly.
+Source-quality inputs `mme.drop.parsed.unhandled` and raw DLQ are planned but not wired yet.
 
-### Must not
+Must not:
 
-- detect gaps per topic;
-- query Oracle for the live event path;
-- use enriched events as authoritative source evidence.
+- detect gaps independently per topic;
+- query Oracle for the hot path;
+- resolve Account → Investor;
+- call Orleans grains.
 
 ---
 
 ## Block 2 - IngestorWatermarkReader
 
-Reads the three current Redis checkpoint/health records.
+**Runs inside `TheEye.Ingestion`.**
 
-Purpose:
+Reads the three current Redis checkpoint/health records and supplies conservative progress proof to the assembler.
 
-```text
-What source progress has each current ingestor safely published?
-```
-
-It supplies a conservative watermark to the assembler. It is not a fraud detector.
+If Redis is unavailable, it must not invent progress/gaps. Contiguous known data may release; an unresolved hole must stall.
 
 ---
 
 ## Block 3 - SourceSequenceBuffer / DropSourceAssembler
 
+**Runs inside `TheEye.Ingestion`.**
+
 Responsibilities:
 
 - global source-sequence reorder;
-- replay/duplicate classification;
+- deterministic replay/duplicate classification;
 - source identity validation;
-- source gap declaration only after safe watermark;
-- attach business-date/transaction context;
-- emit globally ordered canonical source stream.
+- source-gap declaration only after proven safe watermark;
+- canonical/audit/coverage/data-quality publication.
+
+It does **not** own:
+
+```text
+reference projection
+Account → Investor enrichment
+transaction/business-date projection
+market state
+trade pairing
+Orleans dispatch
+```
+
+### Source offset safety
+
+The source Kafka offset is not safe simply because the record entered `SourceSequenceBuffer` in RAM.
+
+A record becomes commit-safe only after its durable terminal output is published. Commit only the highest contiguous safe source offset per topic-partition.
 
 Detailed logic: [[09 - Source Assembly and Ordering Logic|Source Assembly and Ordering Logic]].
 
 ---
 
-## Block 4 - ReferenceStateProjector
+## Canonical Kafka boundary
 
-Consumes canonical reference events in source order.
+`surv.drop.canonical.v1` is the Silo's normal DROP market/reference input.
 
-Outputs:
+Initial ordering contract:
 
 ```text
-as-of participant state
-as-of actor state
-as-of account/investor state
-as-of asset/orderbook state
-as-of custodian/account type/group state
+one partition per SequenceDomain
+producer emits increasing MmeSequenceNumber
+Silo consumes each domain lane sequentially
+```
+
+Parallelism begins after ordered canonical consumption.
+
+---
+
+## Block 4 - ReferenceStateProjector
+
+**Silo-side.** Consumes canonical reference events in source order.
+
+Builds as-of state for:
+
+```text
+participant
+actor
+account / account type / account group
+investor
+asset / order book
+custodian
+corporate action
+other reference messages
+```
+
+### Investor ownership
+
+The Ingestor only transports `InvestorReferenceEvent` and `AccountReferenceEvent`.
+
+The projector resolves:
+
+```text
+Order/Trade account → Account → InvestorId → Investor
 ```
 
 Detailed design: [[10 - Reference State and Enrichment Strategy|Reference State and Enrichment Strategy]].
 
 ---
 
-## Block 5 - TransactionContextProjector
+## Block 5 - Transaction / BusinessDate projectors
 
-Maintains current transaction/matching-round state per DROP partition:
+**Silo-side.** Maintain deterministic correlation/context from canonical source events:
 
 ```text
-StartOfTransaction -> transaction open
-messages           -> stamp transactionId when applicable
+StartOfTransaction -> transaction open per DROP partition
 Commit             -> transaction closed
+InitialBusinessDate / BusinessDateChanged -> current business-date context
 ```
 
-This gives surveillance a correlation boundary without changing the raw payload.
+Do not require the raw Ingestor to mutate every canonical event with derived transaction/business-date state.
 
 ---
 
 ## Block 6 - MarketStateProjector
 
-Maintains lightweight current market context:
+**Silo-side.** Maintains lightweight market context:
 
 ```text
 SessionChange
@@ -219,14 +243,15 @@ CircuitBreaker
 IndexPrice
 TradeStatistics
 AwayMarketBBO
-BusinessDate
 ```
 
-This context is supplied to detectors; detectors do not fetch it from Kafka/Redis themselves.
+Detectors receive explicit context rather than fetching mutable infrastructure directly.
 
 ---
 
 ## Block 7 - TradePairProjector
+
+**Silo-side.**
 
 Input:
 
@@ -240,46 +265,37 @@ Output:
 MatchedTradeEvent
 ```
 
-Key primarily by `matchId`, with source consistency checks around side, order book, price/quantity and trade lifecycle.
+Key primarily by `matchId`, with consistency checks for side/order book/price/quantity/lifecycle. Keep both original source sides permanently addressable by EventId.
 
-Keep both original source sides permanently addressable by event ID.
+Trade pairing is not an Ingestor/SourceAssembly responsibility.
 
 ---
 
 ## Block 8 - External Source Adapters
 
-Adapters for OMS, settlement, lending, KYC, news, security, external venue and other domains.
+Normalize OMS, settlement, lending, KYC, news, security, external venue and other domains to contracts from [[11 - External Event Contracts|External Event Contracts]].
 
-Rules:
-
-- normalize to contracts from [[11 - External Event Contracts|External Event Contracts]];
-- isolate source-specific APIs/protocols from Orleans;
-- preserve original source identity;
-- publish to `surv.external.*` topics;
-- expose data-domain availability state.
+External data remains separate from the raw DROP Ingestor boundary.
 
 ---
 
 ## Block 9 - KeyedMarketDispatcher
 
-Reads canonical source sequence in order, then sends events to state owners while preserving relative order per key.
+**Hosted with the Silo-side runtime.**
 
-Suggested book key:
+Reads already-ordered canonical/projected events and routes to state owners while preserving relative order per key.
+
+Suggested keys:
 
 ```text
 venueId|orderBookId
-```
-
-Suggested subject keys:
-
-```text
-trader/actorId
+actorId
 accountId
 investorId
 participantId
 ```
 
-Do not use a single global SurveillanceGrain.
+Do not use one global SurveillanceGrain.
 
 ---
 
@@ -291,7 +307,7 @@ Owns live book/order lifecycle and short book windows.
 
 ### TraderGrain / AccountGrain / Investor state
 
-Owns subject-level rolling behavior across instruments where needed.
+Own subject-level rolling behavior across instruments where needed.
 
 ### PositionGrain
 
@@ -299,15 +315,15 @@ Owns position/availability state and position-derived windows.
 
 ### RelationshipGrain
 
-Owns graph/relationship state from DROP + validated external KYC/ownership data.
+Owns relationship state from canonical DROP + validated external KYC/ownership sources.
 
 ### Auction state
 
-Can be a dedicated `AuctionGrain` or partition of `OrderBookGrain` depending measured complexity. Start inside `OrderBookGrain` when the auction belongs cleanly to one book; split only when lifecycle/state warrants it.
+Start inside `OrderBookGrain` when ownership is naturally per book; split only if lifecycle/state warrants it.
 
 ### CoverageStateGrain
 
-Owns compact coverage epochs/gaps only. It does not receive every market message.
+Owns compact coverage transitions/gaps only, not every market message.
 
 ---
 
@@ -315,56 +331,29 @@ Owns compact coverage epochs/gaps only. It does not receive every market message
 
 Normal .NET classes, not independent state owners by default.
 
-Examples:
-
 ```text
-OrderLifetimeDetector
-CancellationRatioDetector
-DisplayedSizeAnomalyDetector
-MultiLevelDepthPressureDetector
-OppositeSideExecutionDetector
-PriceImpactDetector
-TimePriceQuantityMatchDetector
-SelfRelatedOwnerDetector
-VolumeParticipationDetector
-AuctionImpactDetector
-PositionConcentrationDetector
-RelationshipCoordinationDetector
-```
-
-Detector rule:
-
-```text
-state comes in
-facts come out
+state/context in
+facts out
 no Kafka/DB/network side effects
 ```
+
+Examples include order lifetime, cancellation ratio, displayed-size anomaly, depth pressure, opposite-side execution, price impact, wash/self relationships, auction impact and position/relationship coordination.
 
 ---
 
 ## Block 12 - Candidate Rule Router
 
-Does not evaluate 540 rules for every event.
+Routes only relevant facts/rule packs using FactType, MarketPhase, instrument profile, subject type and available data domains.
 
-Routing key can use:
-
-```text
-FactType
-MarketPhase
-InstrumentProfile
-AvailableDataDomains
-SubjectType
-```
-
-Missing required data domain => `NotEvaluableMissingDomain`, not a false negative.
+Missing required data domain => `NotEvaluableMissingDomain`.
 
 ---
 
 ## Block 13 - Rules + Alert Correlation
 
-Rules decide suspicious combinations; alert correlation prevents noisy duplicates and combines related episodes.
+Rules decide suspicious combinations; correlation prevents duplicate/noisy alerts.
 
-Every alert must retain:
+Every alert keeps:
 
 ```text
 CaseId
@@ -378,32 +367,29 @@ Source EventIds
 MME sequence range/list
 Kafka evidence coordinates
 CoverageEpoch/degraded flag
-External source evidence refs when used
+External evidence refs when used
 ReplayRunId?
 ```
 
 ## Hot-path rules
 
-The market hot path must not contain:
+Do not put these in the market hot path:
 
 ```text
-Oracle calls
-PostgreSQL calls
-remote external API calls
+Oracle/PostgreSQL calls
+remote APIs
 synchronous news/KYC queries
-long-running ML inference
+long ML inference
 full historical scans
 ```
 
-Those are fed asynchronously or preprojected.
-
 ## Live vs replay
 
-Use the same canonical contracts and detector/rule code.
+Use the same canonical contracts and detector/rule logic:
 
 ```text
-Live source -> live canonical stream -> live Orleans cluster
-Archive/Kafka replay -> replay canonical stream -> replay Orleans cluster
+Live Ingestor → canonical Kafka → live Silo
+Archive/canonical replay → replay Silo
 ```
 
 Do not mix replay state into live grains.
@@ -411,8 +397,8 @@ Do not mix replay state into live grains.
 ## Navigation
 
 - [[00 - Implementation Start Home|Implementation Start Home]]
+- [[15 - Current Runtime Architecture and Fix Plan|Current Runtime Architecture and Fix Plan]]
 - [[09 - Source Assembly and Ordering Logic|Source Assembly and Ordering Logic]]
 - [[10 - Reference State and Enrichment Strategy|Reference State and Enrichment Strategy]]
-- [[11 - External Event Contracts|External Event Contracts]]
 - [[03 - Order Book Surveillance Core|Order Book Surveillance Core]]
 - [[05 - Dotnet Solution Starting Structure|.NET Solution Starting Structure]]
