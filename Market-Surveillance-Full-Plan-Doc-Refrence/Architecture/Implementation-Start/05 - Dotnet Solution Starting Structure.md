@@ -47,7 +47,7 @@ deploy/
 
 ## `TheEye.Contracts`
 
-Stable transport/evidence contracts only.
+Stable transport/evidence contracts only. If the current physical project is named `Shared`, it can fill this logical role initially; do not rename it only for naming consistency.
 
 ```text
 DropEventEnvelope<T>
@@ -59,9 +59,26 @@ Fact contracts
 Alert contracts
 ```
 
-Full catalog: [[07 - Complete Surveillance Event Catalog|Complete Surveillance Event Catalog]].
+Recommended physical contract layout:
 
-No Kafka client, Orleans grain implementation or database logic.
+```text
+Shared/
+├── Envelopes/
+├── Evidence/
+├── Events/
+│   ├── Source/
+│   │   └── Components/
+│   ├── Derived/
+│   └── External/
+├── Facts/
+├── Coverage/
+└── Common/
+```
+
+Full code-facing reference: [[DTO-Reference/00 - DTO and Data Structure Implementation Map|DTO and Data Structure Implementation Map]].  
+Business/source catalog: [[07 - Complete Surveillance Event Catalog|Complete Surveillance Event Catalog]].
+
+No Kafka client, Orleans grain implementation or database logic belongs in the contract project.
 
 ## `TheEye.Domain`
 
@@ -78,6 +95,8 @@ Time-window primitives
 Deterministic math helpers
 ```
 
+State/value implementation reference: [[DTO-Reference/06 - Orleans and Detector State Data Structures|Orleans and Detector State Data Structures]].
+
 ## `TheEye.DropAdapters`
 
 One adapter/mapping layer around current DROP DTOs.
@@ -90,6 +109,8 @@ Responsibilities:
 - extract routing IDs;
 - map native source time to `EventTime`;
 - never invent missing MME sequence values.
+
+Source DTO checklist: [[DTO-Reference/02 - DROP Source DTO Implementation Reference|DROP Source DTO Implementation Reference]].
 
 ## `TheEye.SourceAssembly`
 
@@ -131,6 +152,8 @@ DataDomainAvailabilityProjector
 ```
 
 They build deterministic context from canonical streams.
+
+Derived contract reference: [[DTO-Reference/03 - Derived Event Implementation Reference|Derived Event Implementation Reference]].
 
 ## `TheEye.Ingestion`
 
@@ -178,6 +201,8 @@ SecuritiesLoanGrain
 
 Do not create a grain per event or per detector.
 
+State structures: [[DTO-Reference/06 - Orleans and Detector State Data Structures|Orleans and Detector State Data Structures]].
+
 ## `TheEye.Detectors`
 
 Normal deterministic .NET classes.
@@ -209,6 +234,8 @@ immutable fact out
 no network/database side effect
 ```
 
+First fact contracts: [[DTO-Reference/05 - Detector Fact Contract Reference|Detector Fact Contract Reference]].
+
 ## `TheEye.Rules`
 
 ```text
@@ -233,6 +260,8 @@ RuleEvaluationPersistenceWriter
 
 Persistence remains off the Orleans market hot path.
 
+Alert contract: [[DTO-Reference/03 - Derived Event Implementation Reference|SurveillanceAlertEvent reference]].
+
 ## `TheEye.ExternalAdapters`
 
 Separate adapter per external data domain when connected:
@@ -256,7 +285,7 @@ PositionLimitAdapter
 TenderOfferAdapter
 ```
 
-Contracts: [[11 - External Event Contracts|External Event Contracts]].
+Contracts: [[DTO-Reference/04 - External Event Implementation Reference|External Event Implementation Reference]] and [[11 - External Event Contracts|External Event Contracts]].
 
 ## `TheEye.Api`
 
@@ -346,14 +375,14 @@ External domain availability/configuration
 
 ```text
 0. Source metadata validation harness
-1. Contracts for all DROP source events
+1. Core envelopes/evidence + contracts for all DROP source events
 2. DROP adapters + header/payload validation tests
 3. SourceSequenceBuffer + watermark tests
 4. DropSourceAssembler + audit/canonical output
 5. ReferenceStateProjector + as-of tests
 6. Canonical dispatcher
 7. OrderBookGrain + lifecycle/replay tests
-8. First detectors
+8. First detectors + typed fact contracts
 9. FactBundle + candidate router
 10. Spoof/layer rule pack
 11. Alert evidence builder
@@ -367,6 +396,7 @@ Do not begin by implementing 540 independent rule classes.
 ## Navigation
 
 - [[00 - Implementation Start Home|Implementation Start Home]]
+- [[DTO-Reference/00 - DTO and Data Structure Implementation Map|DTO and Data Structure Implementation Map]]
 - [[07 - Complete Surveillance Event Catalog|Complete Surveillance Event Catalog]]
 - [[09 - Source Assembly and Ordering Logic|Source Assembly and Ordering Logic]]
 - [[10 - Reference State and Enrichment Strategy|Reference State and Enrichment Strategy]]
