@@ -55,6 +55,9 @@ drop-message-id
 drop-group-id
 ```
 
+> [!IMPORTANT]
+> The current vault does **not** verify the byte encoding of the Kafka header `mme-sequence-number`. The DROP protocol's little-endian rule applies to the binary DROP payload and must not be used as proof of this Kafka header's encoding. Do not assume big-endian or little-endian until Phase 0 verifies the current producer implementation or real Kafka header bytes. See [[15 - MME Sequence Header Encoding Verification|MME Sequence Header Encoding Verification]].
+
 So THE EYE must keep these concepts separate:
 
 ```text
@@ -282,11 +285,12 @@ They are separate, but every alert/rule evaluation references coverage state.
 Before detector coding depends on exact ordering, run a controlled high-volume session and prove:
 
 1. all required source records have real MME sequence headers;
-2. header group/message/partition agree with payload;
-3. union of current source topics + unhandled/source-DLQ can be assembled deterministically;
-4. duplicate Start/Commit/replay records can be deduped;
-5. sequence reset/epoch rule is understood;
-6. current Redis checkpoints are safe enough for watermarking.
+2. the exact `mme-sequence-number` Kafka header encoding is verified against current producer code and/or real captured header bytes; see [[15 - MME Sequence Header Encoding Verification|MME Sequence Header Encoding Verification]];
+3. header group/message/partition agree with payload;
+4. union of current source topics + unhandled/source-DLQ can be assembled deterministically;
+5. duplicate Start/Commit/replay records can be deduped;
+6. sequence reset/epoch rule is understood;
+7. current Redis checkpoints are safe enough for watermarking.
 
 ## Source basis
 
@@ -303,3 +307,4 @@ Before detector coding depends on exact ordering, run a controlled high-volume s
 - [[08 - DROP Event Acquisition Matrix|DROP Event Acquisition Matrix]]
 - [[09 - Source Assembly and Ordering Logic|Source Assembly and Ordering Logic]]
 - [[14 - Data Quality and Capability Gaps|Data Quality and Capability Gaps]]
+- [[15 - MME Sequence Header Encoding Verification|MME Sequence Header Encoding Verification]]
