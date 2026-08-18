@@ -10,9 +10,14 @@ tags:
 
 # Source Assembly and Ordering Logic
 
-## Why this component exists
+> [!IMPORTANT]
+> `TheEye.SourceAssembly` is a **library inside the `TheEye.Ingestion` process**. Its responsibility ends when source events are durably represented in the canonical/audit/coverage/data-quality outputs. Reference projection, transaction/business-date context, market state and trade pairing are Silo-side work.
 
-The current DROP application deliberately splits one MME feed into multiple Kafka topic families and three ingestor instances:
+See [[15 - Current Runtime Architecture and Fix Plan|Current Runtime Architecture and Fix Plan]].
+
+## Why source assembly exists
+
+The current DROP application splits one MME feed into three Kafka source families:
 
 ```text
 trades-only
@@ -20,118 +25,75 @@ orders-only
 rest-messages
 ```
 
-The MME source sequence is global across message types, while each Kafka topic sees only a sparse subset. Kafka also does not order records across different topics.
+The MME source sequence is treated as global across message types inside its real source domain, while each Kafka topic contains a sparse subset. Kafka does not order records across topics.
 
-Therefore THE EYE needs a **source assembly stage before Orleans state processing**.
+Therefore THE EYE must assemble one trustworthy sequence **before** Orleans state processing.
 
-## Current evidence available
-
-Current implementation documentation proves that `MME.Drop.Persistence` can read these Kafka headers:
-
-```text
-mme-sequence-number
-
-drop-partition-id
-
-drop-message-id
-
-drop-group-id
-```
-
-The current ingestors also maintain Redis checkpoints:
-
-```text
-mme.drop.ingestor:trades-only:next_mme_sequence_number
-mme.drop.ingestor:orders-only:next_mme_sequence_number
-mme.drop.ingestor:rest-messages:next_mme_sequence_number
-```
-
-and runtime-health hashes:
-
-```text
-mme.drop.ingestor:{instance}:health
-```
-
-The checkpoint is written **after a completed Kafka batch publish**. Replay can therefore duplicate already-published source records if Kafka succeeds and the Redis checkpoint write fails.
-
-That naturally leads to **at-least-once source assembly + deterministic dedupe**.
-
-## Starting architecture
+## Runtime location
 
 ```mermaid
 flowchart TB
-    O[orders-only Kafka outputs] --> COL[DropSourceCollector]
-    T[trades-only Kafka outputs] --> COL
-    R[rest-messages/reference outputs] --> COL
-    U[unhandled + source raw DLQ] --> COL
+    subgraph DROP[Existing DROP platform]
+        O[orders-only Kafka outputs]
+        T[trades-only Kafka outputs]
+        R[rest/reference Kafka outputs]
+        REDIS[ingestor checkpoints + health]
+    end
 
-    W1[trades checkpoint/health] --> WM[IngestorWatermarkReader]
-    W2[orders checkpoint/health] --> WM
-    W3[rest checkpoint/health] --> WM
+    subgraph ING[TheEye.Ingestion - one deployable]
+        COL[DropSourceCollector]
+        CTX[DropSourceRecordContextFactory]
+        ADP[DROP adapters]
+        BUF[SourceSequenceBuffer]
+        WM[IngestorWatermarkReader]
+        ASM[DropSourceAssembler]
+        COL --> CTX --> ADP --> BUF --> ASM
+        WM --> ASM
+    end
 
-    COL --> BUF[SourceSequenceBuffer]
-    WM --> BUF
+    O & T & R --> COL
+    REDIS --> WM
 
-    BUF --> ASM[DropSourceAssembler]
     ASM --> AUDIT[surv.feed.audit.v1]
     ASM --> CANON[surv.drop.canonical.v1]
     ASM --> DQ[surv.dataquality.v1]
     ASM --> COVER[surv.coverage.v1]
 
-    CANON --> DISP[Keyed Market Dispatcher]
-    DISP --> ORL[Orleans grains]
+    CANON --> SILO[TheEye.Silo]
 ```
 
-## Do not merge by arrival time
+`mme.drop.parsed.unhandled` and `mme.drop.raw.messages.dlq` are planned source-quality inputs when available; they are **not yet wired** in the current Ingestor build.
 
-Wrong:
+## Kafka header contract - important correction
+
+The Nasdaq DROP protocol defines the binary **payload** representation. It does not define how the existing MME application serializes Kafka headers.
+
+The current Ingestor reads:
 
 ```text
-orders record arrives first
-trade record arrives second
-reference record arrives third
-=> assume that is exchange order
+mme-sequence-number
+drop-partition-id
+drop-message-id
+drop-group-id
 ```
 
-Correct:
+The first live record disproved the original assumption that every Kafka header uses the DROP payload's fixed binary width.
 
-```text
-collect records from all source topics
-read their MME source sequence
-buffer/reorder by source sequence
-use validated progress/watermarks before declaring a sequence missing
-```
+Therefore:
 
-## SourceSequenceBuffer
-
-Conceptual structure:
-
-```text
-SortedDictionary<ulong, SourceSlot>
-
-SourceSlot
-- SourceSequence
-- CandidateRecords[]
-- FirstSeenAt
-- MessageIdentities
-```
-
-Multiple records may temporarily occupy one sequence because:
-
-- reconnect/replay can duplicate records;
-- StartOfTransaction/Commit are currently documented as produced by all ingestor instances;
-- consumers may see duplicate delivery after failure.
-
-The assembler must classify duplicates rather than applying them twice.
+- confirm the real producer encoding from live evidence and preferably source code;
+- keep all header decoding in `DropSourceRecordContextFactory`;
+- add fixtures for every confirmed representation;
+- quarantine unknown/invalid encodings with hex + text evidence;
+- never infer a Kafka-header encoding from the Nasdaq payload specification.
 
 ## Deterministic source identity
-
-Use the strongest source identity that validation proves.
 
 Starting identity:
 
 ```text
-SequenceDomain
+Source
++ SequenceDomain
 + SequenceEpoch
 + MmeSequenceNumber
 + MessageGroup
@@ -139,13 +101,13 @@ SequenceDomain
 + DropPartitionId
 ```
 
-`SequenceEpoch` prevents collision if source sequence values reset. Do not assume that `BusinessDate` is the epoch until the actual sequence reset rule is verified.
+Kafka topic/partition/offset is delivery evidence, not source identity.
 
-Kafka topic/partition/offset is evidence of **delivery**, not source identity.
+`SequenceEpoch` remains unverified until the actual reset rule is proven.
 
-## Header/payload integrity check
+## Header/payload integrity
 
-For every typed DROP payload:
+For a typed payload:
 
 ```text
 header drop-group-id     == payload.messageGroup
@@ -153,236 +115,228 @@ header drop-message-id   == payload.messageId
 header drop-partition-id == payload.partitionId
 ```
 
-If not:
+Mismatch => `SourceMetadataMismatchEvent`, quarantine, no canonical state application.
+
+Do not manufacture missing values from Kafka offsets.
+
+## SourceSequenceBuffer
+
+Conceptually:
 
 ```text
-emit SourceMetadataMismatchEvent
-mark source record invalid for strict canonical application
-preserve the original Kafka coordinates and payload for investigation
+SortedDictionary<ulong, SourceSlot>
+
+SourceSlot
+- MmeSequenceNumber
+- CandidateRecords[]
+- FirstSeenAt
+- MessageIdentities
 ```
 
-Do not manufacture fallback source metadata from Kafka offset.
+At one source sequence:
 
-## Watermark model
+- same deterministic identity => replay/duplicate;
+- distinct identities => source conflict.
 
-A later event arriving does not by itself prove an earlier sequence is missing; another source topic/ingestor may simply be behind.
+A conflict must become durable `SourceSequenceConflictEvent` evidence in `surv.dataquality.v1`; log-only handling is temporary and must be removed before production.
 
-Use a **validated safe watermark**.
+## Safe watermark
 
-Candidate starting model after Phase-0 proof:
+Candidate model, still requiring Phase-0 validation:
 
 ```text
 tradesPublishedThrough = tradesNextCheckpoint - 1
 ordersPublishedThrough = ordersNextCheckpoint - 1
 restPublishedThrough   = restNextCheckpoint - 1
 
-safeWatermark = min(
-    tradesPublishedThrough,
-    ordersPublishedThrough,
-    restPublishedThrough)
+safeWatermark = min(active published-through values)
 ```
 
-Only sequences `<= safeWatermark` are eligible to be finalized as present/missing.
+A source family that has never published in the current epoch may be excluded only according to an explicit validated rule. Idle-family behavior must be measured.
 
-> [!CAUTION]
-> This watermark formula is a design candidate based on the documented checkpoint timing. It must be validated against the actual family-filter behavior. If a family checkpoint does not advance across periods containing no events for that family, the formula may be conservative and stall; that is acceptable compared with false gap declarations. Do not weaken it until measured.
+A missing sequence is a gap only when:
 
-Runtime-health TTL/status must also be checked. A dead/stale ingestor should produce a **source-stalled** condition, not false gap alarms.
+```text
+sequence absent
+AND
+sequence <= proven safeWatermark
+```
+
+If Redis/watermark proof disappears:
+
+```text
+contiguous already-known records -> may release
+first unresolved hole            -> stop
+new unproven gap                  -> never invent
+```
 
 ## Assembly algorithm
 
 For each `SequenceDomain + SequenceEpoch`:
 
 ```text
-1. Consume all authoritative current source topics.
-2. Read and validate MME source metadata.
-3. Insert record into SourceSequenceBuffer by MmeSequenceNumber.
-4. Deduplicate exact source identity.
-5. Detect conflicting payload/message identity for the same sequence -> critical data-quality event.
-6. Refresh ingestor checkpoints + health.
-7. Calculate safeWatermark.
-8. Starting from nextExpectedSequence:
-     a. if sequence exists -> canonicalize and emit
-     b. if sequence does not exist and sequence <= safeWatermark -> emit CoverageGapEvent and advance
-     c. if sequence > safeWatermark -> wait; do not call it a gap
-9. Commit Kafka offsets only after the record is safely represented in the assembler output/checkpoint strategy.
+1. Consume an available documented source record.
+2. Decode real Kafka source metadata.
+3. Adapt payload without changing business meaning.
+4. Validate header/payload identity.
+5. Insert valid record into SourceSequenceBuffer by MmeSequenceNumber.
+6. Classify deterministic replay duplicates.
+7. Detect distinct same-sequence identities -> data-quality conflict.
+8. Refresh trustworthy watermark when available.
+9. From nextExpectedSequence:
+     a. slot present, one identity -> release canonical/audit output
+     b. slot absent and <= safeWatermark -> emit CoverageGapEvent and advance
+     c. slot absent and > safeWatermark -> wait
+10. Mark source Kafka records safe only after their durable terminal outcome.
+11. Commit only the highest contiguous safe offset per source topic-partition.
 ```
+
+## P0 offset-durability rule
+
+Wrong:
+
+```text
+consume
+→ put only in RAM buffer
+→ commit source Kafka offset
+→ publish canonical later
+```
+
+A crash after the commit can permanently hide an event from surveillance.
+
+Target:
+
+```text
+consume
+→ validate/buffer
+→ release safely
+→ publish durable output
+→ mark source record safe
+→ commit contiguous safe source offset
+```
+
+Consequences:
+
+- restart may replay records;
+- replay duplicates are expected and handled by deterministic `EventId`;
+- do not commit a later Kafka offset past an earlier unresolved record in the same Kafka partition;
+- malformed records become safe only after durable data-quality publication;
+- prolonged unresolved gaps require buffer limits/backpressure/metrics, not early acknowledgement.
 
 ## Output topics
 
-### `surv.feed.audit.v1`
-
-One compact record per finalized source sequence, including unknown/parse-failed records when source identity is known.
-
-Purpose:
-
-- continuity proof;
-- replay coordinates;
-- gap investigation;
-- source-message inventory.
-
-Recommended one partition per global `SequenceDomain` so the audit ledger itself preserves source order.
-
 ### `surv.drop.canonical.v1`
 
-The full canonical source event stream, in source-sequence order.
+The full typed canonical source stream in released MME sequence order.
 
-For current expected volume, keeping one ordered partition per global source sequence domain is a good starting point. It is a serialization point by design because the source sequence itself is serial.
+Initial production rule:
 
-Parallelism begins **after** this stage.
+```text
+one Kafka partition per SequenceDomain
+```
+
+This is intentionally serial at the source-integrity boundary. Parallelism begins inside the Silo after ordered consumption.
+
+### `surv.feed.audit.v1`
+
+Forensic ledger/copy of released source evidence.
 
 ### `surv.coverage.v1`
 
-Contains:
-
-```text
-CoverageHealthy
-CoverageGapEvent
-SourceStalledEvent
-RecoveryStartedEvent
-RecoveryCompletedEvent
-```
+Confirmed coverage transitions/gaps. Sparse per-topic jumps are never enough.
 
 ### `surv.dataquality.v1`
 
-Contains source integrity issues such as:
+Malformed headers, parse failures, metadata mismatches, unknown messages and same-sequence conflicts.
 
-```text
-MissingSequenceHeader
-MissingSourceMetadata
-SourceMetadataMismatch
-ConflictingSameSequencePayload
-UnknownDropMessage
-SourceParseFailure
-ReferenceNotReady
-UnmatchedTradeSideTimeout
-```
+## Silo boundary
 
-## Canonical dispatch without losing per-book order
-
-After the globally ordered canonical topic:
+After publication:
 
 ```mermaid
 flowchart LR
-    C[surv.drop.canonical.v1] --> D[KeyedDispatcher]
-    D --> S0[Shard 0]
-    D --> S1[Shard 1]
-    D --> SN[Shard N]
-    S0 --> G0[OrderBookGrains]
-    S1 --> G1[OrderBookGrains]
-    SN --> GN[OrderBookGrains]
+    C[surv.drop.canonical.v1] --> CC[Canonical consumer in TheEye.Silo]
+    CC --> REF[Reference projector]
+    CC --> TX[Transaction/business-date projector]
+    CC --> MARKET[Market projector]
+    CC --> PAIR[TradePairProjector]
+    CC --> DISP[KeyedMarketDispatcher]
+    REF & TX & MARKET & PAIR --> DISP
+    DISP --> G[Orleans state owners]
 ```
 
-The dispatcher reads canonical events sequentially and appends each event to the target shard/key queue in that same order.
+### Important ownership correction
 
-Suggested market key:
+SourceAssembly does **not**:
+
+- resolve Account → Investor;
+- maintain surveillance reference projections;
+- stamp transaction/business-date by maintaining downstream state;
+- build `MatchedTradeEvent`;
+- maintain order-book state;
+- call Orleans grains.
+
+Those responsibilities belong after the canonical Kafka boundary in `TheEye.Silo`.
+
+The Ingestor may extract natural routing fields already present in the source payload, but it must not perform cross-event enrichment.
+
+## Canonical ordering in the Silo
+
+The Silo canonical consumer reads each sequence-domain lane sequentially. It may then dispatch to keyed state owners while preserving the relative source order of events routed to the same key.
+
+Suggested book key:
 
 ```text
 venueId|orderBookId
 ```
 
-This gives parallel processing across books while preserving relative source order for events routed to the same book.
+Do not add canonical partitions without an explicit design that preserves the ordering contract.
 
-Events that are not book-specific route to their own state owner/reference projector.
+## Topic reconciliation
 
-## Transaction context
+The Ingestor asks Kafka for the real topic inventory and intersects it with the documented registry.
 
-DROP groups orders/trades into matching rounds using `StartOfTransaction` and `Commit`.
+The first live run found **22/37 documented topics present**.
 
-The source assembler/canonicalizer should maintain transaction context **per DROP partition**, conceptually:
-
-```text
-CurrentTransaction[partitionId] = transactionId
-```
-
-For source events between Start and Commit, attach:
+Registry entries must be classified:
 
 ```text
-TransactionId = current transaction id for that DROP partition
+Required
+Optional
+NotProvisioned
 ```
 
-Do not invent a transaction id for messages outside a transaction.
+Missing Required => coverage degraded.
 
-## Business-date context
+Missing Optional/NotProvisioned => visible warning, not automatic permanent false degradation.
 
-Maintain business date from:
-
-- `InitialBusinessDateEvent`
-- `BusinessDateChangedEvent`
-
-Do not derive official business date from server local clock.
-
-If a record arrives before business date can be resolved, retain source evidence and mark the contextual field unresolved instead of inventing a date.
-
-## Event time
-
-Each payload has its own protocol time semantics (`timeChanged`, `tradeTime`, `timestamp`, etc.). The adapter maps the appropriate source field to canonical `EventTime` and keeps the native payload field unchanged.
-
-All DROP timestamps/date fields are protocol `Long` nanoseconds-since-epoch according to the official specification.
-
-## Trade pairing
-
-Do not depend on `mme.drop.enriched.trades` for authoritative surveillance pairing.
-
-Starting deterministic pairing:
-
-```text
-TradeSideEvent A
-TradeSideEvent B
-same matchId
-compatible opposite sides / orderBook / tradePrice / quantity context
-        ↓
-MatchedTradeEvent
-```
-
-If only one side is observed past an appropriate source watermark/window, keep the side and emit a data-quality condition. Never discard it.
-
-## Reference resolution
-
-Do not resolve identities using only today's latest Redis hash.
-
-The canonical sequence must be able to resolve the reference state **as of the source sequence**. See [[10 - Reference State and Enrichment Strategy|Reference State and Enrichment Strategy]].
-
-## Failure/replay rule
-
-Default end-to-end model:
+## Failure/replay model
 
 ```text
 at-least-once transport
 + deterministic EventId
-+ idempotent state application
-+ replayable source history
++ idempotent Silo state application
++ replayable canonical history
 ```
 
-Do not claim exactly-once across Kafka + Orleans + PostgreSQL.
+Do not claim exactly-once across Kafka + Orleans + databases.
 
-Kafka transactions may later be used inside the pure Kafka assembler stage if justified, but they do not make external Orleans state globally transactional.
+## Phase-0/P0 proof required
 
-## When an ingestor change becomes necessary
+Before production Silo logic depends on this boundary, prove:
 
-The first implementation should prefer **read-only consumption of the existing DROP platform**.
-
-Modify/add source-side audit emission only if Phase-0 validation proves that existing topics/headers/watermarks cannot reconstruct a complete sequence safely.
-
-Examples requiring an ingestor/source change:
-
-- `mme-sequence-number` missing on some authoritative source records;
-- a source sequence can be consumed without any normal/unhandled/raw-DLQ Kafka representation;
-- per-instance checkpoints cannot serve as safe progress evidence;
-- sequence domain/reset semantics cannot be identified downstream;
-- current sessions do not collectively expose all source messages.
-
-A fourth DROP session must **not** be assumed possible until EGX concurrent-session/replay policy is confirmed.
-
-## Source basis
-
-- [[DROP-Current-System/03 - Current DROP Runtime Architecture|Current DROP Runtime Architecture]]
-- [[DROP-Current-System/08 - Kafka Topic Catalog|Kafka Topic Catalog]]
-- [[DROP-Current-System/12 - Runtime Guarantees and Known Gaps|Runtime Guarantees and Known Gaps]]
-- [[DROP-Current-System/15 - Source Classification and Reliability|Source Classification and Reliability]]
+1. real Kafka header encoding for all source families;
+2. `SequenceDomain` scope and `SequenceEpoch` reset semantics;
+3. source offsets cannot outrun durable released output;
+4. canonical sequence is monotonic per domain;
+5. idle-family watermark behavior;
+6. Redis outage stalls at unproven holes rather than inventing gaps;
+7. Required/Optional/NotProvisioned topic classification;
+8. crash/restart produces no silent canonical event loss.
 
 ## Navigation
 
+- [[15 - Current Runtime Architecture and Fix Plan|Current Runtime Architecture and Fix Plan]]
 - [[01 - Global Sequence and Feed Continuity|Global Sequence and Feed Continuity]]
 - [[02 - Canonical Event Contract|Canonical Event Contract]]
 - [[08 - DROP Event Acquisition Matrix|DROP Event Acquisition Matrix]]
