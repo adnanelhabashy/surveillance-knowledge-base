@@ -78,14 +78,15 @@ flowchart TB
 7. [[10 - Reference State and Enrichment Strategy|Reference State and Enrichment Strategy]]
 8. [[11 - External Event Contracts|External Event Contracts]]
 9. [[12 - Case Family Event Coverage Matrix|Case Family Event Coverage Matrix]]
+10. [[DTO-Reference/00 - DTO and Data Structure Implementation Map|DTO and Data Structure Implementation Map]] - code-facing reference for every source/derived/external contract, detector fact and core state structure.
 
 ### Processing and first code
 
-10. [[13 - Event Processing Blocks|Event Processing Blocks]]
-11. [[03 - Order Book Surveillance Core|Order Book Surveillance Core]]
-12. [[06 - First Detector Specifications|First Detector Specifications]]
-13. [[04 - First Vertical Slice|First Vertical Slice]]
-14. [[05 - Dotnet Solution Starting Structure|.NET Solution Starting Structure]]
+11. [[13 - Event Processing Blocks|Event Processing Blocks]]
+12. [[03 - Order Book Surveillance Core|Order Book Surveillance Core]]
+13. [[06 - First Detector Specifications|First Detector Specifications]]
+14. [[04 - First Vertical Slice|First Vertical Slice]]
+15. [[05 - Dotnet Solution Starting Structure|.NET Solution Starting Structure]]
 
 ## Phase 0 - mandatory proof before detector implementation
 
@@ -123,6 +124,7 @@ Creating an event class does not mean the source is connected. See [[12 - Case F
 
 ## External graph links
 
+- [[DTO-Reference/00 - DTO and Data Structure Implementation Map|DTO and Data Structure Implementation Map]]
 - [[DROP-Current-System/01 - DROP Protocol Overview|DROP Protocol Overview]]
 - [[DROP-Current-System/02 - DROP Message Catalog|37 Official DROP Messages]]
 - [[DROP-Current-System/03 - Current DROP Runtime Architecture|Current DROP Runtime Architecture]]
