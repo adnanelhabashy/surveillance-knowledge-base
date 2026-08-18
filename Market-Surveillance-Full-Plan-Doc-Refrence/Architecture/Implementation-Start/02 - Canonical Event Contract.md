@@ -9,22 +9,23 @@ tags:
 
 # Canonical Event Contract
 
+> [!IMPORTANT]
+> `surv.drop.canonical.v1` is the **source-truth boundary** between `TheEye.Ingestion` and `TheEye.Silo`. Canonicalization preserves DROP meaning and source evidence; it does not perform cross-event reference enrichment, trade pairing, transaction projection or market-state reconstruction.
+
+See [[15 - Current Runtime Architecture and Fix Plan|Current Runtime Architecture and Fix Plan]].
+
 ## Goal
 
-Give THE EYE one stable contract around current DROP and future external sources **without flattening away source semantics or forensic evidence**.
-
-The canonical model has two parts:
+Give THE EYE one stable contract around current DROP without flattening away source semantics or forensic evidence.
 
 ```text
-Canonical envelope
-+ exact typed source payload
+Canonical source envelope
++ exact typed DROP payload
 ```
 
-Derived convenience fields are allowed, but the original source identifiers/fields remain available.
+## Current canonical envelope shape
 
-## DROP canonical envelope
-
-Starting .NET contract:
+Conceptually:
 
 ```csharp
 public sealed record DropEventEnvelope<TPayload>
@@ -33,7 +34,7 @@ public sealed record DropEventEnvelope<TPayload>
     public required string EventType { get; init; }
     public required int SchemaVersion { get; init; }
 
-    public required string Source { get; init; }              // EGX.MME.DROP
+    public required string Source { get; init; }
     public required string SequenceDomain { get; init; }
     public required string SequenceEpoch { get; init; }
     public required ulong MmeSequenceNumber { get; init; }
@@ -42,12 +43,10 @@ public sealed record DropEventEnvelope<TPayload>
     public required short MessageId { get; init; }
     public required byte DropPartitionId { get; init; }
 
-    public long? TransactionId { get; init; }
-    public DateOnly? BusinessDate { get; init; }
-
     public required DateTimeOffset EventTime { get; init; }
     public required DateTimeOffset ReceiveTime { get; init; }
 
+    // Nullable routing/index hints extracted from this source payload only.
     public int? OrderBookId { get; init; }
     public int? AssetId { get; init; }
     public int? ParticipantId { get; init; }
@@ -61,62 +60,111 @@ public sealed record DropEventEnvelope<TPayload>
     public required int KafkaPartition { get; init; }
     public required long KafkaOffset { get; init; }
 
-    public string? IngestorInstance { get; init; }
-    public string? CorrelationId { get; init; }
-    public string? ReplayRunId { get; init; }
-
     public required TPayload Payload { get; init; }
 }
 ```
 
-The convenience IDs in the envelope are nullable extracted routing/index fields. **The payload remains the source of truth for native DROP fields.**
+The exact physical DTO may contain additional operational fields, but the wire rule is unchanged: **source identity + natural routing hints + source/receive time + Kafka evidence + typed source payload**.
+
+`PayloadObject`/runtime helper properties are not part of the JSON wire contract.
+
+## No cross-event enrichment in the Ingestor
+
+The Ingestor may extract a field only when it is naturally available from that source message.
+
+Examples:
+
+```text
+Investor message -> InvestorId may be present
+Account message  -> InvestorId may be present
+Order message    -> ActorId / ParticipantId / OrderBookId / OrderId are natural
+Trade message    -> ActorId / ParticipantId / OrderBookId / OrderId / MatchId are natural
+```
+
+But the Ingestor must **not** do this:
+
+```text
+Order.account
+  -> query Account reference
+  -> derive InvestorId
+  -> mutate/enrich canonical Order
+```
+
+That Account → Investor resolution belongs to the Silo reference projector.
+
+## Transaction and business-date context
+
+These are **Silo-side projections**, not required Ingestor source enrichment.
+
+Canonical source events preserve the native transaction/date messages:
+
+```text
+StartOfTransaction
+Commit
+InitialBusinessDate
+BusinessDateChanged
+```
+
+The Silo can deterministically derive:
+
+```text
+TransactionContext
+BusinessDateContext
+```
+
+while replaying the same ordered canonical stream.
+
+If a future derived envelope adds transaction/business-date context, it must retain lineage to the original canonical source events and must not redefine the source payload.
 
 ## Sequence fields
 
-Keep four separate concepts:
+Keep separate:
 
 ```text
 MmeSequenceNumber
-    global MME source ordering evidence used by THE EYE
+    MME source ordering evidence used by THE EYE
 
 DropPartitionId
-    protocol partition identifier carried by DROP payload/header
+    DROP protocol partition identity
 
 MarketAnnouncement.sequenceNumber
-    announcement-specific payload field; never use as MME sequence
+    announcement-specific payload field
 
 KafkaOffset
-    transport position in one Kafka topic partition
+    transport position inside one Kafka topic partition
 ```
 
-`MmeSequenceNumber` comes from current Kafka source metadata/header when validated; it is not the generic payload field of the 37 DROP DTOs.
+Never substitute one for another.
 
-See [[01 - Global Sequence and Feed Continuity|Global Sequence and Feed Continuity]].
+## Kafka header encoding correction
+
+`MmeSequenceNumber`, message group/id and DROP partition are transported by the existing application using Kafka headers.
+
+The Nasdaq DROP specification defines the **payload's** little-endian binary representation. It does **not** define the Kafka-header serialization used by the existing MME ingestors.
+
+The first live Ingestor record disproved the original fixed-width assumption for all headers.
+
+Therefore:
+
+- the real Kafka header encoding must be confirmed from live evidence/source code;
+- decoding remains isolated in `DropSourceRecordContextFactory`;
+- unknown encodings are quarantined with raw evidence;
+- no source value is invented when decoding fails.
 
 ## SequenceDomain and SequenceEpoch
 
-`SequenceDomain` names the real source namespace that owns the global sequence.
+`SequenceDomain` names the actual source namespace that owns the MME sequence.
 
-Do not derive it from:
+Do not derive it from topic, message family, order book, actor or DROP partition without proof.
 
-```text
-Kafka topic
-message family
-order book
-trader
-DROP partition
-```
-
-unless the actual source contract proves that one of those is the sequence namespace.
-
-`SequenceEpoch` scopes sequence values if/reset when the source numbering restarts. It may eventually map to a business/session date, but only after the actual reset rule is verified.
+`SequenceEpoch` prevents collisions when sequence values reset. Its reset semantics remain a Phase-0/P0 open item; do not treat business date as the epoch until verified.
 
 ## Deterministic EventId
 
-Starting formula:
+Current design:
 
 ```text
-hash(
+SHA-256(
   Source,
   SequenceDomain,
   SequenceEpoch,
@@ -127,13 +175,11 @@ hash(
 )
 ```
 
-Do not use random GUIDs for replayable source events.
-
-If validation proves `SequenceDomain + SequenceEpoch + MmeSequenceNumber` alone is globally unique, the implementation can simplify while retaining the additional fields as integrity checks.
+No random GUID for replayable source events.
 
 ## Header/payload validation
 
-Current Kafka records expose DROP identity headers. Validate:
+For typed payloads:
 
 ```text
 drop-group-id     == payload.messageGroup
@@ -141,172 +187,48 @@ drop-message-id   == payload.messageId
 drop-partition-id == payload.partitionId
 ```
 
-A mismatch becomes `SourceMetadataMismatchEvent`.
+Mismatch => `SourceMetadataMismatchEvent` in data quality and the source record is not admitted to the strict canonical stream.
 
-Never use persistence-style synthetic fallbacks such as deriving message ID from Kafka offset for surveillance evidence.
+## Event time
 
-## Event time mapping
-
-DROP uses several native timestamp fields. Map the semantically appropriate source time to `EventTime` while preserving the native field in `Payload`.
+Map the semantically correct source timestamp to `EventTime` while retaining the native source field inside `Payload`.
 
 Examples:
 
 ```text
-Order                  -> timeChanged for lifecycle event; also preserve timeCreated
-Trade                  -> tradeTime
-RejectedOrder          -> rejectTime
-OffExchangeTrade       -> changedTime / createdTime retained
-BestBidOffer           -> timestamp
-SessionChange          -> timestamp
-MarketAnnouncement     -> messageTime/timestamp semantics from source payload
-AccountPositionUpdate  -> timestamp
+Order             -> timeChanged
+Trade             -> tradeTime
+RejectedOrder     -> rejectTime
+BestBidOffer      -> timestamp
+SessionChange     -> timestamp
+AccountPosition   -> timestamp
 ```
 
-Exact mapping is adapter-specific and unit-tested against the official message note.
+`ReceiveTime` is ingestion observation time, not a replacement for exchange/source time.
 
-`ReceiveTime` is the time THE EYE/current ingestion transport observed the record, not a replacement for source event time.
+## Important source payload semantics
 
-## Business date
+### `OrderLifecycleEvent`
 
-Not every DROP message carries business date.
+Preserve the official rich Order payload: lifecycle status/before-status, changeReason, quantities, order ownership, order type/capacity, account/custodian/customer information, orderToken and trigger/peg fields.
 
-Maintain business-date context from:
+A derived New/Modify/Cancel interpretation is downstream convenience, not a replacement for native fields.
 
-```text
-InitialBusinessDateEvent
-BusinessDateChangedEvent
-```
+### `TradeSideEvent`
 
-Attach the current resolved business date to canonical events when known. Do not use server calendar date as a silent fallback.
+Official `Trade [20]` is one side of a trade. Preserve `matchId`, side, actor/participant, order, price/quantity, dealSource, passiveAggressive, account/custodian and lifecycle/report fields.
 
-## TransactionId enrichment
+`MatchedTradeEvent` is produced later by the Silo `TradePairProjector`.
 
-`StartOfTransaction` and `Commit` bound matching rounds.
+### Reference events
 
-The canonicalizer keeps transaction state per DROP partition and stamps the applicable `TransactionId` on source events between those boundaries.
+Investor, Account, Actor, Participant, Asset, OrderBook and other reference messages remain independent canonical source events.
 
-This is derived correlation context; the source payload itself is not modified.
+Investor resolution across accounts is Silo-side derived state.
 
-## Full DROP payload set
+## Derived events
 
-The canonical layer supports all 37 official source payloads listed in [[07 - Complete Surveillance Event Catalog|Complete Surveillance Event Catalog]].
-
-Important semantic corrections:
-
-### OrderLifecycleEvent
-
-The official `Order` message is a native order/quote/bait update with rich lifecycle fields.
-
-Do **not** replace it with only:
-
-```text
-Action = New|Modify|Cancel
-```
-
-Preserve fields such as:
-
-```text
-orderId
-previousOrderId
-clientOrderId
-orderToken
-participantId
-actorId
-submitterId
-onBehalfOfSubmitterId
-orderBookId
-triggerOrderBookId
-side
-price
-originalQuantity
-orderQuantity
-leavesQuantity
-displayQuantity
-refreshQuantity
-minimumQuantity
-minimumExecution
-matchedQuantity
-timeInForce / timeInForceData
-orderType / initialOrderType / exchangeOrderType
-orderCategory
-account / custodian / customerInfo
-changeReason
-triggerCondition / triggerPrice / triggerSessionType
-orderStatus / orderStatusBefore
-orderBookPosition
-reloaded
-requestedPosition
-selfMatchPreventionKey
-pegType / pegOffset / capPrice
-orderCapacity
-awayMarketLocked
-```
-
-THE EYE may derive a normalized lifecycle action after reading native status/changeReason, but never discards those source fields.
-
-### TradeSideEvent
-
-Official `Trade [20]` is **one side of a trade**, not a complete buyer+seller execution event.
-
-Preserve source fields including:
-
-```text
-tradeTime
-orderBookId
-participantId
-actorId
-orderId
-clientOrderId
-matchId
-combinationGroupId
-orderPrice
-tradePrice
-quantity
-side
-dealSource
-passiveAggressive
-account / custodian / customerInfo
-tradeStatus
-tradeReportCode
-reportTime
-orderToken
-repo-related fields
-```
-
-A full `MatchedTradeEvent` is derived from compatible sides sharing `matchId`.
-
-### AccountPositionEvent
-
-Preserve:
-
-```text
-assetId
-participantId
-accountId/accountName
-investorId
-availableLongQty
-availableLoanQty
-decimalsInQuantity
-```
-
-Treat this as the position/availability meaning documented by DROP, not as an invented settlement or legal holdings ledger.
-
-## Derived event contract pattern
-
-Derived events always keep source lineage:
-
-```csharp
-public sealed record DerivedEventEvidence
-{
-    public required IReadOnlyList<string> SourceEventIds { get; init; }
-    public required ulong SourceSequenceMin { get; init; }
-    public required ulong SourceSequenceMax { get; init; }
-    public required string CoverageEpochId { get; init; }
-    public required bool CoverageDegraded { get; init; }
-}
-```
-
-Examples:
+Derived events keep source lineage:
 
 ```text
 MatchedTradeEvent
@@ -319,56 +241,20 @@ FactBundle
 SurveillanceAlertEvent
 ```
 
-## External canonical envelope
-
-External source adapters follow the same evidence model but not the DROP-specific fields.
-
-Conceptually:
-
-```csharp
-public sealed record ExternalEventEnvelope<TPayload>
-{
-    public required string EventId { get; init; }
-    public required string EventType { get; init; }
-    public required int SchemaVersion { get; init; }
-    public required string SourceSystem { get; init; }
-    public required string SourceRecordId { get; init; }
-    public string? SourceSequence { get; init; }
-    public required DateTimeOffset EventTime { get; init; }
-    public required DateTimeOffset ReceiveTime { get; init; }
-    public DateOnly? BusinessDate { get; init; }
-    public required TPayload Payload { get; init; }
-}
-```
-
-Specific contracts: [[11 - External Event Contracts|External Event Contracts]].
-
-## Reference resolution
-
-Canonical source events preserve raw IDs.
-
-Resolved events add human/business context from reference state **as-of the source sequence**.
-
-Example:
+Conceptual evidence:
 
 ```text
-OrderLifecycleEvent
-- ActorId = 123
-- AccountId = 456
-
-ResolvedOrderEvent
-- same raw IDs
-- ActorName as-of sequence S
-- Participant classification as-of S
-- Investor relationship as-of S
-- Instrument profile as-of S
+SourceEventIds[]
+SourceSequenceMin/Max
+CoverageEpochId
+CoverageDegraded
 ```
 
-Do not overwrite source IDs with names.
+These are downstream of `surv.drop.canonical.v1`.
 
 ## Kafka evidence
 
-For every consumed source event keep:
+For each source event retain:
 
 ```text
 KafkaTopic
@@ -376,48 +262,44 @@ KafkaPartition
 KafkaOffset
 ```
 
-Source identity and Kafka identity solve different problems:
+MME identity answers **what source event this is**. Kafka coordinates answer **where this delivered evidence was consumed**.
+
+## Canonical topic ordering
+
+For the initial production version:
 
 ```text
-MME identity -> what exchange/source event was observed
-Kafka coordinates -> where THE EYE consumed the delivered evidence
+one surv.drop.canonical.v1 partition per SequenceDomain
 ```
+
+The Ingestor publishes released events in increasing MME sequence order; the Silo consumes that ordered lane sequentially before keyed parallel dispatch.
 
 ## Replay/versioning
 
-- `SchemaVersion` is mandatory.
-- Source `EventId` stays stable across replay.
-- `ReplayRunId` identifies replay execution, not source event identity.
-- Additive schema evolution is preferred.
-- Derived events/alerts record detector/rule/threshold versions.
-- Old canonical events must remain interpretable for investigation.
+- `SchemaVersion` mandatory.
+- Source `EventId` stable across replay.
+- Additive schema evolution preferred.
+- Silo state application idempotent by `EventId`.
+- Replay may duplicate transport; duplicate state effects are not allowed.
 
-## Data quality rule
+## Data-quality rule
 
-If required identity/order metadata cannot be proven:
+If required source identity/order metadata cannot be proven:
 
 ```text
-preserve event
-emit data-quality condition
+preserve forensic evidence
+emit durable data-quality condition
 mark coverage/evaluability appropriately
 ```
 
-Do not silently manufacture values.
-
-## Source basis
-
-- [[DROP-Current-System/01 - DROP Protocol Overview|DROP Protocol Overview]]
-- [[DROP-Current-System/02 - DROP Message Catalog|DROP Message Catalog]]
-- [[DROP-Current-System/05 - Business Data Dictionary and Join Keys|Business Data Dictionary and Join Keys]]
-- [[DROP-Current-System/08 - Kafka Topic Catalog|Kafka Topic Catalog]]
-- [[DROP-Current-System/12 - Runtime Guarantees and Known Gaps|Runtime Guarantees and Known Gaps]]
+Do not manufacture values.
 
 ## Navigation
 
+- [[15 - Current Runtime Architecture and Fix Plan|Current Runtime Architecture and Fix Plan]]
 - [[00 - Implementation Start Home|Implementation Start Home]]
 - [[01 - Global Sequence and Feed Continuity|Global Sequence and Feed Continuity]]
 - [[07 - Complete Surveillance Event Catalog|Complete Surveillance Event Catalog]]
 - [[08 - DROP Event Acquisition Matrix|DROP Event Acquisition Matrix]]
 - [[09 - Source Assembly and Ordering Logic|Source Assembly and Ordering Logic]]
 - [[10 - Reference State and Enrichment Strategy|Reference State and Enrichment Strategy]]
-- [[11 - External Event Contracts|External Event Contracts]]
