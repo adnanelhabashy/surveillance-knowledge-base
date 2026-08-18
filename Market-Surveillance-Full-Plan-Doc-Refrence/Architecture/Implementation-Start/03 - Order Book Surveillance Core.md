@@ -10,28 +10,46 @@ tags:
 
 # Order Book Surveillance Core
 
+> [!IMPORTANT]
+> This core runs **after** the canonical Kafka boundary inside the Silo-side surveillance runtime. `OrderBookGrain` does not consume raw `mme.drop.*` topics and does not participate in global source-gap assembly.
+
+See [[15 - Current Runtime Architecture and Fix Plan|Current Runtime Architecture and Fix Plan]].
+
 ## Purpose
 
-The order-book surveillance core continuously reconstructs market state and calculates reusable facts that help detect manipulation such as spoofing, layering, quote stuffing, fake liquidity and book-pressure abuse.
+The order-book surveillance core reconstructs market state and calculates reusable facts for spoofing, layering, quote stuffing, phantom liquidity and book-pressure abuse.
 
-It is **not** the global sequence-gap detector.
+It is **not** the source sequence-gap detector. Source ordering/coverage belongs to `TheEye.Ingestion`.
+
+## Input path
+
+```text
+raw DROP topics
+→ TheEye.Ingestion / SourceAssembly
+→ surv.drop.canonical.v1
+→ TheEye.Silo canonical consumer
+→ Silo reference/market/trade projectors
+→ KeyedMarketDispatcher
+→ OrderBookGrain
+```
 
 ## State ownership
 
 Use one `OrderBookGrain` per:
 
 ```text
-venueId|instrumentId
+venueId|orderBookId
 ```
 
 The grain owns mutable state that must be ordered together for that market book.
 
 ```mermaid
 flowchart LR
-    E[Order / Trade / BBO / Market State Event] --> OBG[OrderBookGrain]
+    C[surv.drop.canonical.v1] --> S[Silo canonical consumer + projectors]
+    S --> D[KeyedMarketDispatcher]
+    D --> OBG[OrderBookGrain]
     OBG --> STATE[Live book + rolling windows]
     STATE --> DET[Reusable detector classes]
-    E --> DET
     DET --> FACTS[OrderBook FactBundle]
     FACTS --> RULES[Candidate rule packs]
 ```
@@ -55,7 +73,7 @@ LastEventTime
 CoverageEpoch reference
 ```
 
-Do not write the full book to a database after every order. Kafka/source history is the immutable evidence; grain state is the live working model.
+Do not write the full book to a database after every order. Canonical/source history is immutable evidence; grain state is the live working model.
 
 ## Important sequence rule
 
@@ -67,17 +85,31 @@ For one book the received source sequence can look like:
 1012 Trade book A
 ```
 
-This is normal because source messages for other books/types occurred between them.
+This is normal because source events for other books/types occurred between them.
 
-`OrderBookGrain` may use `SourceSequence` to reject a duplicate already applied event or preserve evidence ordering, but it must **not** treat `1000 -> 1004` as a global gap.
+`OrderBookGrain` may use `SourceSequence`/`EventId` for idempotency/evidence, but it must **not** treat `1000 -> 1004` as a global gap.
 
 Global continuity belongs to [[01 - Global Sequence and Feed Continuity|Global Sequence and Feed Continuity]].
+
+## Reference / Investor context
+
+The grain receives already projected/resolved context from the Silo path where needed.
+
+```text
+Order/Trade account
+→ ReferenceStateProjector
+→ Account as-of source sequence
+→ InvestorId / Investor context
+→ dispatcher/grain/detector facts
+```
+
+The grain does not query mutable Redis to resolve Investor identity.
 
 ## "Order book watcher" implementation
 
 Do not create a second state-owning `OrderBookWatcherGrain` for the first build.
 
-Use normal .NET detector services/classes that read the current event + grain-owned state and calculate facts.
+Use normal .NET detector services/classes that receive current event + explicit grain/projector state:
 
 ```text
 OrderBookGrain
@@ -90,7 +122,7 @@ OrderBookGrain
   └─ OrderMessageBurstRateDetector
 ```
 
-This keeps one owner of mutable book state and prevents duplicated/corrupt state between a book grain and a watcher grain.
+This keeps one owner of mutable book state.
 
 ## Detector responsibility
 
@@ -108,9 +140,9 @@ Did the trader execute on the opposite side?
 Was there a burst of order messages across several levels?
 ```
 
-Detectors output **facts**, not final legal conclusions.
+Detectors output facts, not legal conclusions.
 
-Example:
+Example fact:
 
 ```text
 OrderBookPressureFact
@@ -135,61 +167,57 @@ OrderBookPressureFact
 - CoverageEpoch
 ```
 
-Rules can combine these facts differently for spoofing, layering, phantom liquidity, order-book imbalance manipulation and other cases.
-
 ## State update order
 
-For each event keep processing deterministic:
+Keep processing deterministic:
 
 ```text
-1. validate/dedupe envelope
-2. capture pre-event book snapshot/facts needed by detectors
+1. reject duplicate EventId / validate downstream envelope
+2. capture pre-event state needed by detectors
 3. apply event to authoritative OrderBookGrain state
 4. capture post-event state
 5. run relevant detectors
 6. emit FactBundle
-7. route only to relevant rule packs
-8. update short rolling windows
+7. route relevant rule packs
+8. update rolling windows
 ```
-
-Some detectors need both pre- and post-event state, so do not hide the pre-event values before detection.
 
 ## Book consistency checks
 
-Separate structural consistency from fraud detection.
+Keep structural quality separate from fraud detection.
 
 Examples:
 
 - modify/cancel references unknown order;
 - impossible remaining-quantity transition;
 - duplicate lifecycle transition;
-- trade references unknown order where the protocol should provide one;
-- reconstructed depth contradicts an authoritative market-state message.
+- trade references unknown order where protocol relationships should make it known;
+- reconstructed depth contradicts an authoritative market-state event.
 
-Emit a `BookConsistencyIssue`/quality signal. Do not automatically call it fraud.
+Emit a `BookConsistencyIssue`/quality fact. Do not automatically call it fraud.
 
 ## Concurrency
 
 Starting rule:
 
 - keep `OrderBookGrain` non-reentrant on the hot market-event path;
-- one grain activation serializes state changes for its book;
-- detector code called by the grain should be fast, deterministic and non-blocking;
+- one grain activation serializes changes for one book;
+- detector code must be fast/deterministic/non-blocking;
 - no synchronous DB/network calls inside the grain event path;
-- expensive cross-entity analysis happens after reusable facts are produced.
+- cross-entity analysis happens outside or through explicit state/message ownership.
 
-## Persistence
-
-Persist/checkpoint only what is required for recovery speed and deterministic replay.
+## Persistence / replay
 
 For the first slice:
 
-- source/Kafka history remains truth;
-- grain state can be rebuilt from replay;
-- optional periodic snapshots can come later after measured recovery requirements justify them.
+- canonical/source Kafka history remains source truth;
+- grain state is rebuildable by deterministic replay;
+- duplicate transport does not duplicate state because `EventId` application is idempotent;
+- optional snapshots come later only if measured recovery targets justify them.
 
 ## Navigation
 
+- [[15 - Current Runtime Architecture and Fix Plan|Current Runtime Architecture and Fix Plan]]
 - [[00 - Implementation Start Home|Implementation Start Home]]
 - [[01 - Global Sequence and Feed Continuity|Global Sequence and Feed Continuity]]
 - [[02 - Canonical Event Contract|Canonical Event Contract]]
