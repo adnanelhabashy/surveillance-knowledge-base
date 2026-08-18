@@ -12,7 +12,21 @@ tags:
 
 ## Goal
 
-Start with a clean .NET 10 solution where source assembly, contracts, projections, Orleans state, detectors, rules and alerting remain separated.
+Keep clean .NET 10 code boundaries **without turning every project into a deployable microservice**.
+
+Current runtime rule:
+
+```text
+TheEye.Ingestion process
+  hosts TheEye.SourceAssembly + TheEye.DropAdapters
+        ↓
+surv.drop.canonical.v1
+        ↓
+TheEye.Silo process
+  hosts canonical consumption + projectors + dispatcher + Orleans runtime
+```
+
+See [[15 - Current Runtime Architecture and Fix Plan|Current Runtime Architecture and Fix Plan]].
 
 ## Recommended solution
 
@@ -45,9 +59,11 @@ deploy/
   rules/
 ```
 
+A project boundary is for dependency/testability. It does **not** imply a separate container.
+
 ## `TheEye.Contracts`
 
-Stable transport/evidence contracts only. If the current physical project is named `Shared`, it can fill this logical role initially; do not rename it only for naming consistency.
+Stable transport/evidence contracts only:
 
 ```text
 DropEventEnvelope<T>
@@ -59,26 +75,9 @@ Fact contracts
 Alert contracts
 ```
 
-Recommended physical contract layout:
+No Kafka client, Orleans grain implementation or database logic belongs here.
 
-```text
-Shared/
-├── Envelopes/
-├── Evidence/
-├── Events/
-│   ├── Source/
-│   │   └── Components/
-│   ├── Derived/
-│   └── External/
-├── Facts/
-├── Coverage/
-└── Common/
-```
-
-Full code-facing reference: [[DTO-Reference/00 - DTO and Data Structure Implementation Map|DTO and Data Structure Implementation Map]].  
-Business/source catalog: [[07 - Complete Surveillance Event Catalog|Complete Surveillance Event Catalog]].
-
-No Kafka client, Orleans grain implementation or database logic belongs in the contract project.
+Full reference: [[DTO-Reference/00 - DTO and Data Structure Implementation Map|DTO and Data Structure Implementation Map]].
 
 ## `TheEye.Domain`
 
@@ -95,24 +94,21 @@ Time-window primitives
 Deterministic math helpers
 ```
 
-State/value implementation reference: [[DTO-Reference/06 - Orleans and Detector State Data Structures|Orleans and Detector State Data Structures]].
-
 ## `TheEye.DropAdapters`
 
-One adapter/mapping layer around current DROP DTOs.
+Source adaptation only:
 
-Responsibilities:
-
-- validate DROP header/payload identity;
-- map all 37 official messages to canonical event types;
-- preserve native payload fields;
-- extract routing IDs;
-- map native source time to `EventTime`;
-- never invent missing MME sequence values.
-
-Source DTO checklist: [[DTO-Reference/02 - DROP Source DTO Implementation Reference|DROP Source DTO Implementation Reference]].
+- map all documented DROP message payloads to typed source contracts;
+- preserve native source fields/meaning;
+- extract natural routing IDs;
+- map native event time;
+- validate header/payload identity with the source context supplied by Ingestion;
+- never invent MME sequence values;
+- never query reference state to enrich an Order/Trade.
 
 ## `TheEye.SourceAssembly`
+
+**Library hosted inside `TheEye.Ingestion`. It is not a separate runtime/container.**
 
 Core components:
 
@@ -122,25 +118,68 @@ IngestorWatermarkReader
 SourceSequenceBuffer
 DropSourceAssembler
 CoverageTracker
-CanonicalKafkaProducer
+CanonicalPublisher
 ```
 
 Responsibilities:
 
-- consume current source topics read-only;
 - reorder by validated MME sequence;
-- classify duplicates/replays;
+- classify replay/duplicates;
 - detect confirmed gaps using safe watermarks;
-- emit `surv.feed.audit.v1`;
-- emit `surv.drop.canonical.v1`;
-- emit `surv.coverage.v1`;
-- emit `surv.dataquality.v1`.
+- coordinate `surv.feed.audit.v1`;
+- coordinate `surv.drop.canonical.v1`;
+- coordinate `surv.coverage.v1`;
+- coordinate `surv.dataquality.v1`.
 
 Detailed logic: [[09 - Source Assembly and Ordering Logic|Source Assembly and Ordering Logic]].
 
+## `TheEye.Ingestion`
+
+This is the **single source-integrity deployable**.
+
+It hosts:
+
+```text
+Kafka source consumer/admin client
+DropSourceRecordContextFactory
+TheEye.DropAdapters
+TheEye.SourceAssembly
+Redis watermark reader
+Kafka output producer(s)
+```
+
+Responsibilities:
+
+```text
+raw mme.drop.* source topics
+→ topic reconciliation
+→ source-context/header decode
+→ typed adaptation + validation
+→ source ordering/dedupe/gap handling
+→ canonical/audit/coverage/data-quality topics
+```
+
+It must not own:
+
+```text
+reference enrichment
+account → investor resolution
+transaction/business-date projection
+trade pairing
+order-book surveillance state
+Orleans grain calls
+RulesEngine/detectors
+```
+
+### Source-offset reliability requirement
+
+The Ingestor may not commit a source Kafka offset merely because its record entered the in-memory reorder buffer.
+
+Commit only the highest contiguous safe source offset per topic-partition after each record has a durable terminal outcome. See [[15 - Current Runtime Architecture and Fix Plan|fix P0.1]].
+
 ## `TheEye.Projections`
 
-State/context projectors outside Orleans hot book logic:
+Silo-side deterministic projectors:
 
 ```text
 ReferenceStateProjector
@@ -151,29 +190,22 @@ TradePairProjector
 DataDomainAvailabilityProjector
 ```
 
-They build deterministic context from canonical streams.
+These consume canonical/external events and build surveillance context. They do **not** run in the raw source Ingestor.
 
-Derived contract reference: [[DTO-Reference/03 - Derived Event Implementation Reference|Derived Event Implementation Reference]].
+## `TheEye.Silo`
 
-## `TheEye.Ingestion`
+This is the separate Orleans/surveillance runtime deployable.
 
-Reads canonical THE EYE topics, not the unordered family topics directly for state application.
+It hosts:
 
 ```text
 CanonicalMarketConsumer
-ExternalEventConsumer
+CanonicalEnvelopeDeserializer
+Reference/business-date/transaction/market/trade projectors
 KeyedMarketDispatcher
 SubjectDispatcher
+Orleans silo runtime
 ```
-
-Responsibilities:
-
-- preserve canonical sequence order at dispatch boundary;
-- route by order book/subject;
-- call correct Orleans state owner;
-- never perform source gap detection here.
-
-## `TheEye.Silo`
 
 Starting Orleans state owners:
 
@@ -201,13 +233,29 @@ SecuritiesLoanGrain
 
 Do not create a grain per event or per detector.
 
-State structures: [[DTO-Reference/06 - Orleans and Detector State Data Structures|Orleans and Detector State Data Structures]].
+## Investor/reference boundary
+
+The Ingestor publishes reference events unchanged in meaning:
+
+```text
+InvestorReferenceEvent
+AccountReferenceEvent
+ActorReferenceEvent
+ParticipantReferenceEvent
+...
+```
+
+The Silo `ReferenceStateProjector` builds reference state and resolves:
+
+```text
+Order/Trade account → Account → InvestorId → Investor
+```
+
+Do not move this join into the Ingestor.
 
 ## `TheEye.Detectors`
 
-Normal deterministic .NET classes.
-
-Examples:
+Normal deterministic .NET classes:
 
 ```text
 CancellationRatioDetector
@@ -234,8 +282,6 @@ immutable fact out
 no network/database side effect
 ```
 
-First fact contracts: [[DTO-Reference/05 - Detector Fact Contract Reference|Detector Fact Contract Reference]].
-
 ## `TheEye.Rules`
 
 ```text
@@ -260,70 +306,34 @@ RuleEvaluationPersistenceWriter
 
 Persistence remains off the Orleans market hot path.
 
-Alert contract: [[DTO-Reference/03 - Derived Event Implementation Reference|SurveillanceAlertEvent reference]].
-
 ## `TheEye.ExternalAdapters`
 
-Separate adapter per external data domain when connected:
-
-```text
-ClientOrderAdapter
-RoutingAdapter
-BorrowLocateAdapter
-SecuritiesLoanAdapter
-SettlementAdapter
-OwnershipKycAdapter
-MnpiComplianceAdapter
-IssuerEventAdapter
-OfferingAdapter
-ExternalVenueAdapter
-BenchmarkAdapter
-TradeReportAdapter
-NewsPromotionAdapter
-AccountSecurityAdapter
-PositionLimitAdapter
-TenderOfferAdapter
-```
-
-Contracts: [[DTO-Reference/04 - External Event Implementation Reference|External Event Implementation Reference]] and [[11 - External Event Contracts|External Event Contracts]].
+Separate adapter per connected external domain. External sources publish normalized `surv.external.*` events and do not bypass Silo/projector/rule evidence contracts.
 
 ## `TheEye.Api`
 
-Later query/admin surface:
+Later query/admin surface only. Never put it in the market-event processing path.
 
-```text
-alerts
-rule versions
-coverage/gaps
-data-domain availability
-reference/source evidence
-replay runs
-calibration profiles
-case coverage status
-```
-
-Never place the API in the market-event processing path.
-
-## Runtime containers - first implementation
+## Runtime containers - current target
 
 ```text
 Existing DROP Kafka
-Existing DROP Redis                # read-only checkpoint/health access
-TheEye.SourceAssembly
-TheEye.Ingestion
-TheEye.Silo-1
-TheEye.Silo-2
+Existing DROP Redis
+
+TheEye.Ingestion          # includes SourceAssembly library
+TheEye.Silo-1             # canonical consumer + projectors + Orleans
+TheEye.Silo-2             # when HA/scale-out is enabled
 TheEye.AlertWriter
-PostgreSQL                         # alerts/config/evaluation records
-TheEye.Api                          # when needed
+PostgreSQL
+TheEye.Api                 # when needed
 Observability stack
 ```
+
+**Removed from the deployment diagram:** standalone `TheEye.SourceAssembly` and standalone `TheEye.Ingestion` dispatcher service. SourceAssembly is inside Ingestion; canonical dispatch belongs in Silo.
 
 External adapters become separate workers/containers as sources are connected.
 
 ## Kafka topics owned by THE EYE
-
-Starting internal topics:
 
 ```text
 surv.feed.audit.v1
@@ -336,33 +346,31 @@ surv.alerts.candidates.v1
 surv.alerts.created.v1
 ```
 
-Avoid one topic per fraud case.
+`surv.drop.canonical.v1` starts with **one partition per SequenceDomain** to preserve assembler ordering.
 
-## Consumer group rule
-
-THE EYE uses dedicated groups such as:
+## Consumer groups
 
 ```text
-theeye-source-assembly-v1
-theeye-canonical-live-v1
-theeye-reference-projector-v1
+theeye-source-assembly-v1   # TheEye.Ingestion raw-source consumer
+theeye-canonical-live-v1    # TheEye.Silo canonical consumer
 theeye-alert-writer-v1
 ```
 
-Never reuse current DROP persistence/enrichment groups.
+Do not reuse existing DROP persistence/enrichment groups.
 
 ## Configuration
 
 Externalize:
 
 ```text
-Current source topic names
+Current source topic names + Required/Optional/NotProvisioned class
 Kafka brokers
-Source sequence header names
+Confirmed source header encoding
 Ingestor Redis checkpoint/health keys
 SequenceDomain/SequenceEpoch strategy
-Source-assembly buffer limits
+Source-assembly buffer/backpressure limits
 Watermark polling/staleness policy
+Canonical partition/order policy
 Orleans cluster/service ids
 Rule directory/version
 Threshold profiles
@@ -371,24 +379,26 @@ Internal topic names
 External domain availability/configuration
 ```
 
-## First coding order
+## First coding order from the current state
+
+The Ingestor/contracts/adapters already exist, so the remaining sequence is:
 
 ```text
-0. Source metadata validation harness
-1. Core envelopes/evidence + contracts for all DROP source events
-2. DROP adapters + header/payload validation tests
-3. SourceSequenceBuffer + watermark tests
-4. DropSourceAssembler + audit/canonical output
-5. ReferenceStateProjector + as-of tests
-6. Canonical dispatcher
-7. OrderBookGrain + lifecycle/replay tests
-8. First detectors + typed fact contracts
-9. FactBundle + candidate router
-10. Spoof/layer rule pack
-11. Alert evidence builder
-12. Integration/replay/failure tests
-13. Expand DROP-native detector families
-14. Connect external data domains incrementally
+0. Fix source-offset durability
+1. Confirm real Kafka header encoding
+2. Confirm SequenceDomain / SequenceEpoch
+3. Prove canonical ordering integration test
+4. Reconcile Required / Optional / NotProvisioned topics
+5. Add durable sequence-conflict event
+6. Wire source-quality topics
+7. Build TheEye.Silo canonical consumer/deserializer
+8. Build ReferenceStateProjector + Account→Investor resolution
+9. Build transaction/business-date/market projectors
+10. Build TradePairProjector
+11. KeyedMarketDispatcher
+12. OrderBookGrain + replay tests
+13. first detectors + facts
+14. RulesEngine + alert evidence
 ```
 
 Do not begin by implementing 540 independent rule classes.
@@ -396,10 +406,9 @@ Do not begin by implementing 540 independent rule classes.
 ## Navigation
 
 - [[00 - Implementation Start Home|Implementation Start Home]]
+- [[15 - Current Runtime Architecture and Fix Plan|Current Runtime Architecture and Fix Plan]]
 - [[DTO-Reference/00 - DTO and Data Structure Implementation Map|DTO and Data Structure Implementation Map]]
-- [[07 - Complete Surveillance Event Catalog|Complete Surveillance Event Catalog]]
 - [[09 - Source Assembly and Ordering Logic|Source Assembly and Ordering Logic]]
 - [[10 - Reference State and Enrichment Strategy|Reference State and Enrichment Strategy]]
-- [[11 - External Event Contracts|External Event Contracts]]
 - [[13 - Event Processing Blocks|Event Processing Blocks]]
 - [[04 - First Vertical Slice|First Vertical Slice]]
