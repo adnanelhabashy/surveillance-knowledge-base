@@ -1,7 +1,7 @@
 ---
 id: IMPL-START-15
 type: architecture-validation
-status: phase-0-required
+status: verified
 tags:
   - surveillance/implementation
   - surveillance/sequence
@@ -9,113 +9,122 @@ tags:
   - drop/kafka
 ---
 
-# MME Sequence Header Encoding Verification
+# Kafka Sequence Header Encoding Verification
 
 ## Decision status
 
 > [!IMPORTANT]
-> The byte encoding of the Kafka header `mme-sequence-number` is currently **UNVERIFIED** in this vault.
+> **Verified current application contract — 2026-08-19.**
+>
+> `mme-sequence-number` and `topic-sequence-number` are 8-byte little-endian `UInt64` Kafka headers. `topic-sequence-epoch` is 32 lowercase hexadecimal ASCII/UTF-8 characters.
 
-Do **not** assume that the Kafka header is big-endian or little-endian until it is verified against the running MME.Drop.Ingestor implementation or a real captured Kafka record.
+The official Nasdaq DROP protocol also uses little-endian values in its binary payload, but the Kafka headers below are **application-level metadata added by the current platform**. The Nasdaq wire specification is not the source of truth for these Kafka header names.
 
-## What is verified
+## Verified current Kafka header contract
 
-The official DROP protocol uses **little-endian** byte order for the DROP binary payload itself.
+| Header | Current format | THE EYE rule |
+|---|---|---|
+| `mme-sequence-number` | 8-byte binary unsigned `UInt64`, little-endian | Required source/global sequence metadata. Decode only as little-endian binary. |
+| `topic-sequence-number` | 8-byte binary unsigned `UInt64`, little-endian | Required for the selected-topic continuity guard. Producer encoding is equivalent to `BitConverter.GetBytes(ulong)` on the current little-endian .NET runtime. |
+| `topic-sequence-epoch` | UTF-8/ASCII-compatible text, exactly 32 lowercase hexadecimal characters, normally GUID `"N"` format | Required together with `topic-sequence-number`; sequence identity is `(topic, epoch, number)`. |
+| `drop-group-id` | ASCII decimal text | Parse as decimal `Int16` range. |
+| `drop-message-id` | ASCII decimal text | Parse as decimal `Int16` range. |
+| `drop-partition-id` | ASCII decimal text | Parse as decimal byte range. |
 
-See [[DROP-Current-System/01 - DROP Protocol Overview|DROP Protocol Overview]].
-
-That protocol-wide statement applies to the DROP wire payload and does **not**, by itself, prove the byte encoding used for the separately-added Kafka header `mme-sequence-number`.
-
-The current surveillance baseline also establishes that `MmeSequenceNumber` is not a normal DROP payload field. It is transported separately as source metadata in Kafka headers.
-
-See [[01 - Global Sequence and Feed Continuity|Global Sequence and Feed Continuity]].
-
-## What is not verified
-
-The current vault does not establish whether `mme-sequence-number` is encoded as:
-
-```text
-8-byte big-endian unsigned integer
-8-byte little-endian unsigned integer
-UTF-8 / ASCII unsigned decimal text
-another producer-specific representation
-```
-
-[[DROP-Current-System/Services/MME Drop Ingestor|MME Drop Ingestor]] documents the sequence/checkpoint model and sparse filtered outputs, but it does not define the Kafka header byte order.
-
-Therefore THE EYE must not let an assumed endian choice drive source-sequence decoding.
-
-## Implementation rule
-
-Until Phase 0 proves the encoding:
-
-- do not hard-code `BinaryPrimitives.ReadUInt64BigEndian(...)` as an architectural assumption;
-- do not hard-code `BinaryPrimitives.ReadUInt64LittleEndian(...)` as an architectural assumption;
-- do not infer the header encoding from the DROP payload's little-endian rule;
-- do not invent a sequence value from Kafka offset or another field when the header cannot be decoded;
-- treat an undecodable or missing source sequence as a source metadata/data-quality condition.
-
-Once the producer encoding is verified, the decoder must use one explicit deterministic format and be protected by fixture-based unit tests. Avoid heuristic endian auto-detection in production because both byte orders can produce syntactically valid `ulong` values.
-
-## Phase-0 verification procedure
-
-Use at least one controlled live/high-volume DROP session and perform the following:
-
-1. Capture a real Kafka record from an authoritative current DROP topic.
-2. Dump the raw bytes of the `mme-sequence-number` Kafka header without converting them first.
-3. Record the Kafka topic, partition, offset, message group, message id and DROP partition for evidence.
-4. Decode the same raw header bytes as:
-   - unsigned 64-bit big-endian;
-   - unsigned 64-bit little-endian;
-   - unsigned decimal text if the bytes are valid text.
-5. Compare the plausible decoded value with the corresponding ingestor Redis checkpoint:
+Example topic epoch:
 
 ```text
-mme.drop.ingestor:{instance}:next_mme_sequence_number
+0123456789abcdef0123456789abcdef
 ```
 
-6. Remember that the checkpoint stores the **next** source sequence to request/process, so compare using the documented checkpoint timing rather than expecting exact equality for every sampled message.
-7. Preferably inspect the actual current `MME.Drop.Ingestor` C# producer code and identify the exact code that creates the `mme-sequence-number` Kafka header.
-8. Capture several consecutive records, not only one, and verify that decoded sequence progression matches the expected global source-sequence behavior.
-9. Save a small real fixture containing the raw header bytes and expected decoded value.
-10. Add a unit test to THE EYE that proves the chosen decoder against that fixture.
+## Compatibility policy
 
-## Acceptance criteria
+The persistence side can accept `topic-sequence-number` as UTF-8/ASCII decimal text as a rollout compatibility fallback.
 
-This item becomes **VERIFIED** only when at least one of the following authoritative implementation proofs exists:
-
-- current MME.Drop.Ingestor producer code explicitly shows how `mme-sequence-number` is serialized; or
-- captured current Kafka header bytes plus Redis/source-sequence evidence unambiguously prove the encoding.
-
-Preferred completion evidence is **both** producer-code inspection and a real Kafka fixture.
-
-Record the result here as:
+THE EYE production default is stricter:
 
 ```text
-Verified encoding: <format>
-Verified against: <producer commit / fixture / environment>
-Verification date: <date>
-Fixture location: <path>
-Decoder test: <test name/path>
+SourceAssembly:TopicSequence:AllowAsciiDecimalFallback = false
 ```
 
-## Relationship to source authority
+This avoids heuristic decoding in the surveillance hot path. If a staged producer rollout temporarily requires text compatibility, the fallback can be explicitly enabled in `appsettings.json` and disabled again after rollout.
 
-Follow [[DROP-Current-System/15 - Source Classification and Reliability|Source Classification and Reliability]]:
+## Why both topic values are required
 
-- official Nasdaq DROP protocol documentation is authoritative for DROP wire/message semantics;
-- verified current service/architecture documentation is authoritative for what the current system actually runs;
-- implementation assumptions must not be promoted to verified facts without evidence.
+Never interpret `topic-sequence-number` alone.
 
-The DROP protocol's little-endian rule and the Kafka `mme-sequence-number` header encoding are therefore two separate concerns.
+Correct identity:
+
+```text
+KafkaTopic
++ TopicSequenceEpoch
++ TopicSequenceNumber
+```
+
+The epoch separates sequence lifetimes/restarts. A lower number in a new epoch is a new baseline, not automatically a backward sequence fault.
+
+The current guard keeps an independent frontier for every `(topic, epoch)` pair, which also avoids corrupting continuity if more than one producer epoch appears on a shared topic.
+
+## Relationship to MME sequence
+
+Keep the two sequence concepts separate:
+
+```text
+MmeSequenceNumber
+    = global/source ordering and evidence across DROP message types
+
+TopicSequenceEpoch + TopicSequenceNumber
+    = continuity proof for one configured Kafka topic sequence
+```
+
+When THE EYE deliberately excludes reference topics, the MME source sequence visible to THE EYE is sparse. Therefore a jump in `MmeSequenceNumber` is **not** itself a selected-topic gap.
+
+Selected-topic gap detection uses the per-topic sequence pair. Global MME sequence remains attached to every canonical event and is still used to preserve relative source order among selected events.
+
+See [[16 - Trading-Only Acquisition and Topic Sequence Guard|Trading-Only Acquisition and Topic Sequence Guard]].
+
+## Current implementation
+
+Decoder:
+
+```text
+TheEye.Ingestion/DropSourceRecordContextFactory.cs
+```
+
+Tests cover:
+
+- 8-byte little-endian `mme-sequence-number`;
+- 8-byte little-endian `topic-sequence-number`;
+- optional ASCII decimal compatibility mode;
+- required number/epoch pairing;
+- exact 32-character lowercase-hex epoch validation;
+- malformed header rejection.
+
+## Oracle persistence representation
+
+The current sequence-guard summary uses:
+
+```text
+TOPIC_SEQUENCE_NUMBER NUMBER(20)
+TOPIC_SEQUENCE_EPOCH  VARCHAR2(32 CHAR)
+```
+
+These widths fit the current Kafka contract. `UInt64.MaxValue` has 20 decimal digits, and the epoch is exactly 32 characters.
+
+Oracle persistence is useful for audit/reconciliation. It is **not** used as the live gap-checking loop; the hot path checks sequence continuity directly from Kafka headers in memory.
+
+## Source authority note
+
+- Official Nasdaq DROP specification: authoritative for native DROP payload fields and little-endian DROP wire encoding.
+- Current platform producer/header contract: authoritative for these additional Kafka headers.
+- THE EYE decoder must fail closed on malformed/missing required source metadata rather than inventing values from Kafka offsets.
 
 ## Navigation
 
 - [[00 - Implementation Start Home|Implementation Start Home]]
 - [[01 - Global Sequence and Feed Continuity|Global Sequence and Feed Continuity]]
-- [[02 - Canonical Event Contract|Canonical Event Contract]]
 - [[09 - Source Assembly and Ordering Logic|Source Assembly and Ordering Logic]]
 - [[14 - Data Quality and Capability Gaps|Data Quality and Capability Gaps]]
+- [[16 - Trading-Only Acquisition and Topic Sequence Guard|Trading-Only Acquisition and Topic Sequence Guard]]
 - [[DROP-Current-System/01 - DROP Protocol Overview|DROP Protocol Overview]]
-- [[DROP-Current-System/Services/MME Drop Ingestor|MME Drop Ingestor]]
 - [[DROP-Current-System/15 - Source Classification and Reliability|Source Classification and Reliability]]
