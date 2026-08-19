@@ -76,3 +76,37 @@ tags:
 ## Ordering / scaling fact
 
 Current topics are documented as one partition per topic in the verified baseline. That preserves per-partition ordering but constrains consumer parallelism and provides no broker redundancy in the current one-broker/RF1 setup.
+
+## Current application sequence headers
+
+Current source records used by THE EYE carry additional Kafka metadata:
+
+| Header | Format |
+|---|---|
+| `mme-sequence-number` | 8-byte binary `UInt64`, little-endian |
+| `topic-sequence-number` | 8-byte binary `UInt64`, little-endian |
+| `topic-sequence-epoch` | 32 lowercase hexadecimal ASCII/UTF-8 characters |
+| `drop-group-id` | ASCII decimal |
+| `drop-message-id` | ASCII decimal |
+| `drop-partition-id` | ASCII decimal |
+
+`topic-sequence-number` and `topic-sequence-epoch` must be interpreted together. Persistence may accept decimal-text topic sequence as a compatibility fallback, but THE EYE production default is strict binary.
+
+These are current **application/Kafka metadata contracts**, not native fields defined by the Nasdaq DROP wire specification.
+
+## THE EYE selected-topic runtime profile
+
+THE EYE does not subscribe to every topic in this catalog. The active hot path is configuration-driven and selects trading/live-market context only.
+
+Pure reference/identity topics are resolved from the existing Redis reference cache. The exact current selected list is maintained in:
+
+[[Architecture/Implementation-Start/16 - Trading-Only Acquisition and Topic Sequence Guard|Trading-Only Acquisition and Topic Sequence Guard]].
+
+Because the selected set is sparse in global MME sequence space:
+
+```text
+MmeSequenceNumber -> relative global ordering/evidence
+TopicSequenceEpoch + TopicSequenceNumber -> selected-topic gap detection
+```
+
+Do not declare a THE EYE coverage gap merely because selected events have non-contiguous MME sequence numbers.
