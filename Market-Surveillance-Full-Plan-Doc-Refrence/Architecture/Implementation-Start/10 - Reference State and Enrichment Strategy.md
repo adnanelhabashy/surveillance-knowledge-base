@@ -10,50 +10,19 @@ tags:
 
 # Reference State and Enrichment Strategy
 
-## Why THE EYE needs its own reference projection
+## Current runtime decision
 
-The current DROP platform already has `ReferenceDataCacheService` and Redis hashes, but surveillance needs **historically reproducible as-of identity resolution**.
+The active THE EYE ingestion worker does **not** consume the pure reference/identity Kafka topics in its real-time hot path.
 
-The official protocol flow is:
+The current DROP platform already runs `ReferenceDataCacheService`, which projects the latest reference state into Redis. THE EYE uses that existing cache for live identity/reference lookup.
 
-```text
-initial reference publication
-    ↓
-EndOfReferenceData
-    ↓
-real-time messages
-    ↓
-reference updates may still occur at any time
-```
+This keeps the ingestion worker focused on trading and live market-context data and avoids parsing/reference duplication on every surveillance run.
 
-Therefore reference data is not a one-time startup lookup.
+See [[16 - Trading-Only Acquisition and Topic Sequence Guard|Trading-Only Acquisition and Topic Sequence Guard]].
 
-## Authoritative inputs
+## Existing Redis reference keys
 
-Consume these source events directly through the canonical source stream:
-
-```text
-ParticipantReferenceEvent
-ActorReferenceEvent
-AssetReferenceEvent
-OrderBookReferenceEvent
-AccountReferenceEvent
-AccountTypeReferenceEvent
-AccountGroupReferenceEvent
-InvestorReferenceEvent
-CustodianReferenceEvent
-CorporateActionEvent
-ReferenceDataCompletedEvent
-ExchangeRateEvent
-InitialBusinessDateEvent
-AccountPositionEvent
-```
-
-Current topic mappings are in [[08 - DROP Event Acquisition Matrix|DROP Event Acquisition Matrix]].
-
-## Current Redis cache - role in THE EYE
-
-Current keys include:
+The current platform documents keys such as:
 
 ```text
 asset:{id}
@@ -70,49 +39,63 @@ exchangerate:{currency}
 accountpos:{asset}:{participant}:{account}:{investor}
 ```
 
-THE EYE may use current Redis for diagnostics or optional fast bootstrap, but must not treat today's Redis values as the only forensic truth because:
+This is the starting live lookup source for participant/actor/account/investor/instrument context.
 
-- Redis contains mutable latest state;
-- replay/historical analysis needs the value valid at the historical source sequence;
-- current reference consumer failure/restart semantics are not a complete historical version store.
+## Live enrichment flow
 
-## ReferenceStateProjector
-
-Build a surveillance-owned projector from canonical reference events.
-
-Conceptual key/value:
-
-```text
-ReferenceEntityKey
-- EntityType
-- EntityId
-
-ReferenceVersion
-- ValidFromSourceSequence
-- ValidToSourceSequence?
-- Action
-- SourceEventId
-- RawPayload
-- NormalizedFields
+```mermaid
+flowchart LR
+    K[Selected trading Kafka topics] --> ING[TheEye.Ingestion]
+    ING --> C[surv.drop.canonical.v1]
+    R[(Existing Redis reference cache)] --> RES[Reference resolver]
+    C --> RES
+    RES --> D[Dispatcher / Orleans / detectors]
 ```
 
-For hot processing, keep current/latest values in memory/Orleans/local cache. For replay/forensics, retain version history in a durable projection store or rebuild from `surv.drop.canonical.v1`.
+The ingestion adapter preserves raw numeric/source IDs. Reference resolution enriches those IDs for downstream use; it must not replace or erase the original evidence.
 
-## Action semantics
+## What stays in the selected Kafka stream
 
-Several reference messages carry an `action` such as create/update/delete.
-
-The projector should apply the source action exactly and keep tombstones/version history instead of physically forgetting that the entity once existed.
+Some messages have names that sound like reference data but are live market context and stay selected, for example:
 
 ```text
-Create -> new version
-Update -> close previous version + open new version
-Delete -> close previous version + tombstone
+ReferencePriceEvent
+PriceLimitsEvent
+BestBidOfferEvent
+EquilibriumPriceEvent
+SessionChangeEvent
+BusinessDateChangedEvent
+CircuitBreakerEvent
 ```
 
-## Core identity graph
+These affect current market state and manipulation detection directly.
 
-Starting relationships from DROP:
+## What is excluded from the ingestion worker
+
+Current pure/cache-supplied set includes:
+
+```text
+ParticipantReferenceEvent
+ActorReferenceEvent
+AssetReferenceEvent
+OrderBookReferenceEvent
+AccountReferenceEvent
+AccountTypeReferenceEvent
+AccountGroupReferenceEvent
+InvestorReferenceEvent
+CustodianReferenceEvent
+ReferenceDataCompletedEvent
+InitialBusinessDateEvent
+CorporateActionEvent
+ExchangeRateEvent
+AccountPositionEvent
+```
+
+If a real-time detector later requires one excluded domain as a first-class event transition rather than a latest-value lookup, add the corresponding topic explicitly to `TopicConsumption:Topics` and update the architecture note. Do not silently broaden the worker back to all topics.
+
+## Identity graph used by surveillance
+
+The main current relationships remain:
 
 ```mermaid
 flowchart LR
@@ -121,208 +104,125 @@ flowchart LR
     PARTICIPANT --> ACCOUNT[Account]
     ACCOUNTTYPE[AccountType] --> ACCOUNT
     INVESTOR[Investor] --> ACCOUNT
-    CUST[Custodian] -. context .-> ACCOUNT
-    ACCOUNTGROUP[AccountGroup] -. allowed/group .-> ACTOR
-    BOOK --> ORDER[Order/Trade]
-    ACTOR --> ORDER
-    ACCOUNT --> ORDER
-    PARTICIPANT --> ORDER
+    ACCOUNTGROUP[AccountGroup] -. authorization/group .-> ACTOR
+    BOOK --> EVT[Order / Trade]
+    ACTOR --> EVT
+    ACCOUNT --> EVT
+    PARTICIPANT --> EVT
 ```
 
-Preserve raw IDs even after names/descriptions are resolved.
+The Redis representation is an operational cache of these current relationships.
 
-## As-of resolution
+## Important forensic limitation
 
-For a market event with source sequence `S`:
+Redis is mutable **latest state**. That is ideal for live low-latency resolution, but by itself it is not enough to prove what a reference value was at an arbitrary historical MME sequence.
+
+Therefore keep these two requirements separate:
 
 ```text
-resolve entity version where
-ValidFromSourceSequence <= S
-and (ValidToSourceSequence is null or S < ValidToSourceSequence)
+live surveillance
+    -> use existing Redis reference cache
+
+historical/as-of replay and regulatory reproducibility
+    -> requires preserved/versioned reference history or a reproducible reference snapshot/archive
 ```
 
-This prevents a later participant/account/instrument update from changing the interpretation of an older alert during replay.
+The current ingestion optimization chooses Redis for the live path. It does **not** claim that today's Redis value is automatically the historically correct value for every old alert.
 
-## Order enrichment - recommended surveillance model
+A later hardening phase can provide one of:
 
-Current `mme.drop.enriched.orders` is not authoritative for THE EYE because current Redis lookup failures can publish degraded/missing fields and replay can duplicate output.
+- versioned reference-event archive outside the hot ingestion worker;
+- periodic immutable reference snapshots plus update history;
+- a surveillance reference projection built from archived source data.
 
-Use:
+Do not add those costs to the live path until the forensic requirement is implemented deliberately.
+
+## Order resolution
+
+Starting live model:
 
 ```text
 OrderLifecycleEvent
       +
-ReferenceState as-of SourceSequence
+current Redis reference values
       ↓
-ResolvedOrderEvent
+ResolvedOrderContext
 ```
 
-Suggested resolved context:
+Useful context includes:
 
 ```text
 orderBook / asset
 participant
 actor
 account
-accountType
+account type
 investor
 custodian when available
-instrument product/classification
-session/market context
 ```
 
-Keep both:
+Keep both raw IDs and resolved descriptive/classification data.
 
-```text
-Raw source IDs
-Resolved names/classifications
-```
+## Trade resolution
 
-Never replace the raw IDs with only resolved text.
-
-## Trade enrichment/pairing - recommended surveillance model
-
-Current `mme.drop.enriched.trades` can be useful as a comparison view but the current Redis pending-list flow has documented duplicate/race windows.
-
-THE EYE should derive:
+Starting model:
 
 ```text
 TradeSideEvent
-      ↓ matchId pairing
+      ↓ deterministic matchId pairing when needed
 MatchedTradeEvent
-      ↓ as-of reference resolution
-ResolvedTradeEvent
+      +
+current Redis reference values
+      ↓
+ResolvedTradeContext
 ```
 
-The individual source trade sides remain evidence even after pairing.
+Do not make current enriched trade/order topics the only evidence source. Raw parsed lifecycle/trade-side semantics remain the authoritative surveillance event evidence.
 
 ## Beneficial owner meaning
 
-DROP provides an `Investor` entity and Account -> Investor relationship. Treat this as the **DROP-provided investor identity**.
+DROP `Investor` and Account -> Investor relationships provide the platform's investor identity. Use them as provided.
 
-Do not automatically claim it is the complete legal beneficial-ownership graph required for every nominee/related-party surveillance case.
+Do not automatically claim they represent every legal beneficial-ownership/related-party relationship required for all 540 cases. External KYC/ownership relationships can be added through the external event contracts when needed.
 
-For wider relationship surveillance, merge additional KYC/ownership data through `BeneficialOwnershipRelationshipEvent` from [[11 - External Event Contracts|External Event Contracts]].
+## Hot-path cache rule
 
-## Instrument relationships
+Downstream market-state processing should avoid repeated network lookups for the same entity on every low-level book update.
 
-DROP `Asset` and `OrderBook` provide strong instrument/product attributes including option/repo-related fields.
-
-For cross-product surveillance, derive what can be proven from DROP, but use external `InstrumentRelationshipEvent` when full relationships such as these are not present:
+Recommended pattern:
 
 ```text
-option -> underlying
-future -> underlying
-ETF -> basket constituents
-index -> constituents/weights
-depositary receipt -> underlying
-related cash/derivative instruments
+Redis
+  -> small local immutable/read-through reference cache
+  -> dispatcher/resolved event context
+  -> grains/detectors
 ```
 
-## Session and market context
+This keeps Redis as the operational source while removing unnecessary per-event network latency from grain hot paths.
 
-Keep market/session state separately from static reference:
+## Failure behavior
+
+If a required Redis reference value is missing/unavailable:
 
 ```text
-SessionChangeEvent
-PriceLimitsEvent
-ReferencePriceEvent
-CircuitBreakerEvent
-BestBidOfferEvent
-EquilibriumPriceEvent
-BusinessDateChangedEvent
+preserve the raw market event
+mark reference context unresolved/degraded
+continue according to detector capability
+never invent investor/account identity
 ```
 
-A detector asks for explicit context as-of event sequence/time; it should not query mutable infrastructure directly.
-
-## Position state
-
-`AccountPositionUpdate` provides available long/loan quantities for asset/participant/account/investor.
-
-Use it as one position/availability input:
-
-```text
-AccountPositionState
-- AssetId
-- ParticipantId
-- AccountId/Name
-- InvestorId
-- AvailableLongQty
-- AvailableLoanQty
-- EffectiveSourceSequence
-```
-
-Do not silently equate it to:
-
-- full settled holdings history;
-- all open obligations;
-- all borrowed securities;
-- all regulatory position-limit calculations.
-
-Those may require external settlement/lending/position sources.
-
-## Reference readiness
-
-Starting state machine:
-
-```mermaid
-stateDiagram-v2
-    [*] --> LoadingReference
-    LoadingReference --> ReferenceReady: EndOfReferenceData
-    ReferenceReady --> ReferenceReady: later reference update
-    LoadingReference --> Degraded: missing/invalid reference source
-    ReferenceReady --> Degraded: reference processing failure
-    Degraded --> ReferenceReady: replay/rebuild confirmed
-```
-
-Business processing can be configured to wait for `ReferenceReady` on live startup, matching the protocol's initial-reference-before-real-time contract.
-
-## Cache design
-
-Keep the hot lookup simple:
-
-```text
-ReferenceSnapshotCache
-- latest entity versions
-- immutable value objects
-- keyed by numeric source ID
-- no network call from OrderBookGrain hot path
-```
-
-A background projector updates the cache; grains receive already-resolved context or a local immutable snapshot service.
-
-## Replay
-
-Replay must rebuild reference state from the same source sequence before applying dependent business events.
-
-Correct:
-
-```text
-source seq 100 Participant update
-source seq 101 Account update
-source seq 102 Order
-=> Order resolves reference state after 100/101
-```
-
-Incorrect:
-
-```text
-replay source seq 102 Order
-=> look up today's Redis value
-```
+A detector that requires the missing identity should return a not-evaluable/degraded result rather than "no manipulation".
 
 ## Source basis
 
-- [[DROP-Current-System/01 - DROP Protocol Overview|DROP Protocol Overview]]
 - [[DROP-Current-System/04 - Entity and Identity Model|Entity and Identity Model]]
 - [[DROP-Current-System/05 - Business Data Dictionary and Join Keys|Business Data Dictionary and Join Keys]]
 - [[DROP-Current-System/08 - Kafka Topic Catalog|Kafka Topic Catalog]]
-- [[DROP-Current-System/12 - Runtime Guarantees and Known Gaps|Runtime Guarantees and Known Gaps]]
+- [[DROP-Current-System/09 - Redis State and Reference Cache|Redis State and Reference Cache]]
 
 ## Navigation
 
-- [[07 - Complete Surveillance Event Catalog|Complete Surveillance Event Catalog]]
 - [[08 - DROP Event Acquisition Matrix|DROP Event Acquisition Matrix]]
 - [[09 - Source Assembly and Ordering Logic|Source Assembly and Ordering Logic]]
 - [[11 - External Event Contracts|External Event Contracts]]
-- [[03 - Order Book Surveillance Core|Order Book Surveillance Core]]
+- [[16 - Trading-Only Acquisition and Topic Sequence Guard|Trading-Only Acquisition and Topic Sequence Guard]]

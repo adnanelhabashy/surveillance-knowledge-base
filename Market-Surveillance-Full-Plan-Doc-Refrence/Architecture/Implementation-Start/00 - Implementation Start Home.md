@@ -10,117 +10,139 @@ tags:
 # Implementation Start Home
 
 > [!IMPORTANT]
-> This folder is the **active starting point for THE EYE implementation**. The design is now grounded in the official DROP protocol, the verified current three-ingestor/Kafka/Redis architecture and the 540-case surveillance catalog.
+> This folder is the **active starting point for THE EYE implementation**. The current runtime profile consumes trading/live-market Kafka topics only, uses the existing Redis reference cache for identity/reference lookup, preserves selected events in MME relative order, and uses per-topic sequence headers for fast coverage gaps.
 
-## Complete starting graph
+## Current starting graph
 
 ```mermaid
 flowchart TB
-    DROP[Current EGX DROP platform] --> COL[DropSourceCollector]
-    REDIS[Current ingestor sequence checkpoints + health] --> WM[Safe Watermark]
-    COL --> ASM[DropSourceAssembler]
-    WM --> ASM
+    DROP[Current EGX DROP Kafka topics] --> SEL[Configured trading/context topics]
+    SEL --> ING[TheEye.Ingestion]
+
+    ING --> TSG[TopicSequenceGuard]
+    TSG --> COVER[surv.coverage.v1]
+
+    ING --> ASM[DropSourceAssembler sparse MME order]
+    REDISWM[Current ingestor sequence checkpoints] --> ASM
 
     ASM --> AUDIT[surv.feed.audit.v1]
     ASM --> CANON[surv.drop.canonical.v1]
-    ASM --> COVER[surv.coverage.v1]
     ASM --> DQ[surv.dataquality.v1]
 
-    CANON --> REF[ReferenceStateProjector]
-    CANON --> DISP[Keyed Market Dispatcher]
+    REFREDIS[(Existing Redis reference cache)] --> RESOLVE[Reference resolver/cache]
+    CANON --> RESOLVE
+    RESOLVE --> DISP[Keyed Market Dispatcher]
 
     EXT[External source adapters] --> EXTEVENTS[surv.external.*]
     EXTEVENTS --> DISP
 
     DISP --> BOOK[OrderBookGrain]
-    DISP --> SUBJECT[Trader / Account / Investor / Position / Relationship state]
+    DISP --> SUBJECT[Trader / Account / Investor / Relationship state]
 
     BOOK --> DET[Reusable detectors]
     SUBJECT --> DET
     COVER --> DET
 
     DET --> FACTS[FactBundle]
-    FACTS --> ROUTER[Candidate Rule Router]
-    ROUTER --> RULES[Rules Engine]
+    FACTS --> RULES[Rules Engine]
     RULES --> ALERT[Alert + evidence + coverage]
 ```
 
 ## Core decisions
 
-1. **The MME sequence is global across message types inside its real source sequence domain.** A filtered Kafka topic is not a sequence domain.
-2. **Current Kafka arrival order across topics is not exchange order.** THE EYE assembles source events by MME source sequence using validated source metadata and safe watermarks.
-3. **Start with the current DROP Kafka outputs read-only.** Do not add a fourth DROP session unless Phase-0 validation proves downstream assembly is insufficient and EGX concurrent-session policy is confirmed.
-4. **All 37 official DROP messages are first-class source events.** Do not throw away messages simply because the first detector does not use them.
-5. **The official Order message is a rich lifecycle update.** Preserve native `orderStatus`, `orderStatusBefore`, `changeReason`, quantities and ownership; a simple New/Modify/Cancel action is only a derived convenience.
-6. **The official Trade message is one trade side.** Build a complete `MatchedTradeEvent` deterministically from source sides when needed.
-7. **Reference data is versioned state.** Initial reference data finishes before live traffic, but later reference updates can occur at any time. Resolve identities as-of source sequence.
-8. **Current enriched orders/trades are secondary views, not authoritative surveillance evidence**, because current enrichment has documented degradation/duplicate/race windows.
-9. **OrderBookGrain owns mutable book state.** Fraud monitoring around the book is reusable detector logic, not a second competing OrderBookWatcher grain.
-10. **Grains own mutable state; detectors calculate facts; rules own policy.**
-11. **At-least-once + deterministic EventId + idempotent state application** is the default end-to-end reliability model.
-12. **The 540 cases require more than DROP.** Client orders, routing, borrow/locate, settlement, ownership, MNPI, news/social, security and other domains are explicit external event contracts.
-13. Missing external data means **NotEvaluableMissingDomain**, not “no fraud found.”
-14. Every alert/rule result carries source evidence and coverage state.
+1. **MME sequence is global source evidence/order metadata.** It remains attached to canonical events.
+2. **The hot ingestion profile is intentionally filtered.** A jump in MME sequence caused by an excluded reference topic is not a selected-feed gap.
+3. **Selected-topic gaps use `topic-sequence-epoch + topic-sequence-number`.** This is the fast coverage mechanism.
+4. **`mme-sequence-number` and `topic-sequence-number` are verified 8-byte little-endian `UInt64` Kafka headers.**
+5. **Topic sequence identity is `(KafkaTopic, TopicSequenceEpoch, TopicSequenceNumber)`.** Never use the number alone.
+6. **Topic subscription and Kafka performance behavior live in `appsettings.json`.** No 37-topic hard-coded worker subscription.
+7. **Reference/identity values come from the existing Redis reference cache in the current live profile.** Historical/as-of reference reproducibility remains a separate hardening requirement.
+8. **Raw parsed orders/trades remain authoritative surveillance event evidence.** Current enriched topics are secondary views.
+9. **The official Order message is a rich lifecycle update.** Preserve native status/changeReason/quantities/ownership.
+10. **The official Trade message is one trade side.** Pair by source identity/`matchId` when a matched execution view is needed.
+11. **OrderBookGrain owns mutable book state; grains own state; detectors calculate facts; rules own policy.**
+12. **At-least-once + deterministic EventId + idempotent application** is the baseline reliability model.
+13. **Missing data is explicit degraded/not-evaluable coverage**, never silently treated as clean market behavior.
+14. **The full 540-case program may need external domains beyond DROP/Redis.** Those remain explicit external contracts.
 
 ## Read in this order
 
 ### Source correctness
 
 1. [[01 - Global Sequence and Feed Continuity|Global Sequence and Feed Continuity]]
-2. [[02 - Canonical Event Contract|Canonical Event Contract]]
-3. [[08 - DROP Event Acquisition Matrix|DROP Event Acquisition Matrix]]
-4. [[09 - Source Assembly and Ordering Logic|Source Assembly and Ordering Logic]]
-5. [[14 - Data Quality and Capability Gaps|Data Quality and Capability Gaps]]
+2. [[15 - MME Sequence Header Encoding Verification|Kafka Sequence Header Encoding Verification]]
+3. [[16 - Trading-Only Acquisition and Topic Sequence Guard|Trading-Only Acquisition and Topic Sequence Guard]]
+4. [[02 - Canonical Event Contract|Canonical Event Contract]]
+5. [[08 - DROP Event Acquisition Matrix|DROP Event Acquisition Matrix]]
+6. [[09 - Source Assembly and Ordering Logic|Source Assembly and Ordering Logic]]
+7. [[14 - Data Quality and Capability Gaps|Data Quality and Capability Gaps]]
 
 ### Complete event model
 
-6. [[07 - Complete Surveillance Event Catalog|Complete Surveillance Event Catalog]]
-7. [[10 - Reference State and Enrichment Strategy|Reference State and Enrichment Strategy]]
-8. [[11 - External Event Contracts|External Event Contracts]]
-9. [[12 - Case Family Event Coverage Matrix|Case Family Event Coverage Matrix]]
-10. [[DTO-Reference/00 - DTO and Data Structure Implementation Map|DTO and Data Structure Implementation Map]] - code-facing reference for every source/derived/external contract, detector fact and core state structure.
+8. [[07 - Complete Surveillance Event Catalog|Complete Surveillance Event Catalog]]
+9. [[10 - Reference State and Enrichment Strategy|Reference State and Enrichment Strategy]]
+10. [[11 - External Event Contracts|External Event Contracts]]
+11. [[12 - Case Family Event Coverage Matrix|Case Family Event Coverage Matrix]]
+12. [[DTO-Reference/00 - DTO and Data Structure Implementation Map|DTO and Data Structure Implementation Map]]
 
 ### Processing and first code
 
-11. [[13 - Event Processing Blocks|Event Processing Blocks]]
-12. [[03 - Order Book Surveillance Core|Order Book Surveillance Core]]
-13. [[06 - First Detector Specifications|First Detector Specifications]]
-14. [[04 - First Vertical Slice|First Vertical Slice]]
-15. [[05 - Dotnet Solution Starting Structure|.NET Solution Starting Structure]]
+13. [[13 - Event Processing Blocks|Event Processing Blocks]]
+14. [[03 - Order Book Surveillance Core|Order Book Surveillance Core]]
+15. [[06 - First Detector Specifications|First Detector Specifications]]
+16. [[04 - First Vertical Slice|First Vertical Slice]]
+17. [[05 - Dotnet Solution Starting Structure|.NET Solution Starting Structure]]
 
-## Phase 0 - mandatory proof before detector implementation
+## Current acquisition rule
 
-Before relying on exact source ordering, prove on a controlled DROP run:
+The event catalog can contain all official DROP contracts, but that does **not** mean the current live worker must subscribe to every current Kafka topic.
+
+Current implementation distinction:
 
 ```text
-all authoritative source records carry mme-sequence-number
-header message/group/partition match payload
-union of current source topics can be deterministically assembled
-unhandled/raw-DLQ records preserve source identity when parsing fails
-duplicates/replays are deterministic
-sequence reset/epoch semantics are known
-three ingestor checkpoints can be used as conservative progress watermarks
+Event contract coverage
+    -> broad; preserve ability to model official DROP domains
+
+Live ingestion subscription
+    -> narrow; trading + live market context only
+
+Reference identity lookup
+    -> existing Redis cache
 ```
 
-If these assumptions fail, fix the source metadata/audit contract first.
+The exact selected topic list is documented in [[16 - Trading-Only Acquisition and Topic Sequence Guard|Trading-Only Acquisition and Topic Sequence Guard]] and owned operationally by `appsettings.json`.
+
+## Current Phase-0/validation focus
+
+Validate on a controlled/high-volume run:
+
+```text
+required selected records carry mme-sequence-number
+required selected records carry topic-sequence-number + topic-sequence-epoch
+binary sequence decoding matches producer contract
+header message/group/partition match payload
+selected topic sequence increments correctly within each epoch
+all selected topics satisfy the current one-partition assumption
+three ingestor checkpoints remain safe enough as conservative cross-topic release watermarks
+Redis reference availability meets detector lookup requirements
+consumer lag/CPU/Redis/Kafka latency remain within measured targets
+```
 
 ## Event coverage principle
 
 ```text
-DROP native events
-    -> core exchange surveillance
+DROP selected live events
+    -> core exchange surveillance hot path
 
-DROP-derived events/facts
-    -> reusable behavioral evidence
+Redis reference state
+    -> current identity/instrument enrichment
 
 External canonical events
     -> client/MNPI/settlement/lending/news/security/cross-venue domains
 
-All three together
-    -> full 540-case program
+All together
+    -> full surveillance program
 ```
-
-Creating an event class does not mean the source is connected. See [[12 - Case Family Event Coverage Matrix|Case Family Event Coverage Matrix]].
 
 ## External graph links
 
@@ -128,10 +150,9 @@ Creating an event class does not mean the source is connected. See [[12 - Case F
 - [[DROP-Current-System/01 - DROP Protocol Overview|DROP Protocol Overview]]
 - [[DROP-Current-System/02 - DROP Message Catalog|37 Official DROP Messages]]
 - [[DROP-Current-System/03 - Current DROP Runtime Architecture|Current DROP Runtime Architecture]]
-- [[DROP-Current-System/06 - Surveillance Data Interface Boundary|Surveillance Data Interface Boundary]]
 - [[DROP-Current-System/08 - Kafka Topic Catalog|Current Kafka Topic Catalog]]
+- [[DROP-Current-System/09 - Redis State and Reference Cache|Current Redis State and Reference Cache]]
 - [[DROP-Current-System/12 - Runtime Guarantees and Known Gaps|Current Runtime Guarantees and Gaps]]
-- [[DROP-Current-System/15 - Source Classification and Reliability|Source Hierarchy]]
 - [[MOCs/03 - Reusable Detector Map|Reusable Detector Map]]
 - [[MOCs/01 - Surveillance Case Map|540 Surveillance Cases]]
 - [[Architecture/Implementation Workspace Guide|Implementation Workspace Guide]]
