@@ -10,174 +10,175 @@ tags:
 
 # DROP Event Acquisition Matrix
 
-## Rule
+## Active runtime rule
 
-THE EYE should consume the **current parsed/reference Kafka topics read-only** with its own consumer group. It must not change the current DROP persistence/enrichment consumer groups.
+THE EYE ingestion consumes **configured trading/live-market topics read-only** with its own consumer group.
 
-For surveillance evidence, the raw parsed/reference event is authoritative. Current enriched topics are convenience/cross-check inputs only.
+Pure reference/identity topics are deliberately not part of this worker's hot Kafka subscription because the current platform already maintains that state in Redis.
 
-## Source metadata to capture from every Kafka record
-
-The current persistence implementation documents these Kafka headers:
+The topic list is not hard-coded in the registry/worker. The active subscription is owned by:
 
 ```text
-mme-sequence-number   -> global MME source sequence metadata when present
-
-drop-partition-id     -> DROP partition id
-
-drop-message-id       -> DROP protocol message id
-
-drop-group-id         -> DROP protocol message group
+TheEye.Ingestion/appsettings.json
+TopicConsumption:Topics
 ```
 
-Surveillance must also keep:
+See [[16 - Trading-Only Acquisition and Topic Sequence Guard|Trading-Only Acquisition and Topic Sequence Guard]].
+
+## Required Kafka metadata
+
+Every selected source record must carry:
+
+```text
+mme-sequence-number
+    8-byte little-endian UInt64
+
+topic-sequence-number
+    8-byte little-endian UInt64
+
+topic-sequence-epoch
+    32 lowercase hexadecimal ASCII/UTF-8 chars
+
+drop-partition-id
+    ASCII decimal
+
+drop-message-id
+    ASCII decimal
+
+drop-group-id
+    ASCII decimal
+```
+
+THE EYE also preserves:
 
 ```text
 Kafka topic
 Kafka partition
 Kafka offset
-Kafka timestamp/receive time
-Ingestor/source instance when available
+receive time
 ```
 
-> [!IMPORTANT]
-> The existing persistence service has fallback values when some headers are absent. **THE EYE must not use synthetic fallbacks for forensic identity.** Missing or inconsistent source metadata must create a data-quality/coverage condition.
+Missing/inconsistent required source metadata is a data-quality/coverage condition. Do not create synthetic forensic values from Kafka offsets.
 
-## Complete current topic-to-event map
+See [[15 - MME Sequence Header Encoding Verification|Kafka Sequence Header Encoding Verification]].
+
+## Active selected topics
 
 ### Transaction boundaries
 
-| Current Kafka topic | Current producer | Canonical event | Gathering rule |
-|---|---|---|---|
-| `mme.drop.parsed.startoftransaction` | all MME.Drop.Ingestor instances | `TransactionStartedEvent` | Consume; dedupe replay/duplicate copies by deterministic source identity. Maintain transaction context per DROP partition. |
-| `mme.drop.parsed.commit` | all MME.Drop.Ingestor instances | `TransactionCommittedEvent` | Consume; close current transaction context and retain transaction timing. |
-
-### Reference and identity
-
-| Current Kafka topic | Current producer | Canonical event | Gathering rule |
-|---|---|---|---|
-| `mme.drop.parsed.endofreferencedata` | rest-messages | `ReferenceDataCompletedEvent` | Marks initial reference snapshot completion. Do not assume reference data stops changing afterward. |
-| `mme.drop.reference.participants` | rest-messages | `ParticipantReferenceEvent` | Apply create/update/delete semantics to versioned reference state. |
-| `mme.drop.reference.actors` | rest-messages | `ActorReferenceEvent` | Keep actor-to-participant and account authorization context. |
-| `mme.drop.reference.assets` | rest-messages | `AssetReferenceEvent` | Keep ISIN/product/classification data as-of source sequence. |
-| `mme.drop.reference.orderbooks` | rest-messages | `OrderBookReferenceEvent` | Primary order-book/instrument definition; preserve asset relationship, tick/quantity conventions and product attributes. |
-| `mme.drop.parsed.corporateactions` | rest-messages | `CorporateActionEvent` | Apply effective-date/action state; retain source payload. |
-| `mme.drop.reference.accounts` | rest-messages | `AccountReferenceEvent` | Preserve participant/accountType/investor relationships. |
-| `mme.drop.reference.accounttypes` | rest-messages | `AccountTypeReferenceEvent` | Keep legal/localization/omnibus classifications. |
-| `mme.drop.reference.accountgroups` | rest-messages | `AccountGroupReferenceEvent` | Keep group membership and group identity. |
-| `mme.drop.reference.investors` | rest-messages | `InvestorReferenceEvent` | Investor identity/status state. |
-| `mme.drop.reference.custodians` | rest-messages | `CustodianReferenceEvent` | Custodian and omnibus context. |
+| Current Kafka topic | Canonical event | Rule |
+|---|---|---|
+| `mme.drop.parsed.startoftransaction` | `TransactionStartedEvent` | Consume; preserve transaction context. |
+| `mme.drop.parsed.commit` | `TransactionCommittedEvent` | Consume; preserve matching-round completion/timing. |
 
 ### Orders, trades and quote flow
 
-| Current Kafka topic | Current producer | Canonical event | Gathering rule |
-|---|---|---|---|
-| `mme.drop.parsed.orders` | orders-only | `OrderLifecycleEvent` | Authoritative order/quote/bait lifecycle. Do not reduce source semantics to a simplistic New/Modify/Cancel enum; preserve native status/changeReason and derive lifecycle action separately. |
-| `mme.drop.parsed.rejectedorders` | orders-only | `RejectedOrderEvent` | Keep submitted values/error reason for probing, invalid-order and abuse analytics. |
-| `mme.drop.parsed.trades` | trades-only | `TradeSideEvent` | One source record is one side of a trade. Pair by `matchId` in THE EYE if a full execution view is needed. |
-| `mme.drop.parsed.offexchangetrades` | trades-only | `OffExchangeTradeEvent` | Keep report lifecycle, counterparty/report fields, settlement/agreement timing and change reason. |
-| `mme.drop.parsed.tradestatistics` | trades-only | `TradeStatisticsEvent` | Use for market baseline, VWAP/volume/price context; do not replace raw executions with summary data. |
-| `mme.drop.parsed.circuitbreakerinfo` | rest-messages | `CircuitBreakerEvent` | Use for safeguard/session context and trigger-order evidence. |
-| `mme.drop.parsed.quoterequests` | orders-only | `QuoteRequestEvent` | RFQ lifecycle source. |
-| `mme.drop.parsed.quoterequestresponses` | orders-only | `QuoteRequestResponseEvent` | RFQ response lifecycle source. |
-| `mme.drop.parsed.indicativequotes` | orders-only | `IndicativeQuoteEvent` | Indicative quote lifecycle source. |
-| `mme.drop.parsed.indicativequoteoffers` | orders-only | `IndicativeQuoteOfferEvent` | Offer-against-indicative-quote lifecycle source. |
+| Current Kafka topic | Canonical event | Rule |
+|---|---|---|
+| `mme.drop.parsed.orders` | `OrderLifecycleEvent` | Authoritative full order/quote/bait lifecycle. |
+| `mme.drop.parsed.rejectedorders` | `RejectedOrderEvent` | Preserve reject evidence and submitted values. |
+| `mme.drop.parsed.trades` | `TradeSideEvent` | One DROP record is one trade side; pair deterministically by `matchId` when needed. |
+| `mme.drop.parsed.offexchangetrades` | `OffExchangeTradeEvent` | Preserve report lifecycle/counterparty/timing. |
+| `mme.drop.parsed.tradestatistics` | `TradeStatisticsEvent` | Market VWAP/volume/price baseline context. |
+| `mme.drop.parsed.circuitbreakerinfo` | `CircuitBreakerEvent` | Safeguard/trigger-order evidence. |
+| `mme.drop.parsed.quoterequests` | `QuoteRequestEvent` | RFQ lifecycle. |
+| `mme.drop.parsed.quoterequestresponses` | `QuoteRequestResponseEvent` | RFQ response lifecycle. |
+| `mme.drop.parsed.indicativequotes` | `IndicativeQuoteEvent` | Indicative quote lifecycle. |
+| `mme.drop.parsed.indicativequoteoffers` | `IndicativeQuoteOfferEvent` | Indicative quote offer lifecycle. |
 
 ### Price and market state
 
-| Current Kafka topic | Current producer | Canonical event | Gathering rule |
-|---|---|---|---|
-| `mme.drop.parsed.bestbidoffers` | orders-only | `BestBidOfferEvent` | Market top-of-book context/cross-check for reconstructed book. |
-| `mme.drop.parsed.equilibriumprices` | rest-messages | `EquilibriumPriceEvent` | Critical auction indicative-price/imbalance input. |
-| `mme.drop.parsed.indexprices` | rest-messages | `IndexPriceEvent` | Index/benchmark context. |
-| `mme.drop.parsed.pricelimits` | rest-messages | `PriceLimitsEvent` | Static/dynamic price bands and circuit-breaker context. |
-| `mme.drop.parsed.referenceprices` | rest-messages | `ReferencePriceEvent` | Reference-price source/state. |
-| `mme.drop.parsed.exchangerates` | rest-messages | `ExchangeRateEvent` | Currency conversion/cross-product context. |
-| `mme.drop.parsed.awaymarketbbo` | rest-messages | `AwayMarketBestBidOfferEvent` | Away-market top-of-book context. It is not a substitute for full external venue order/trade data. |
-| `mme.drop.parsed.delayedlastmatchprices` | trades-only | `DelayedLastMatchPriceEvent` | Keep delayed value and actual execution time separately. |
-
-### Session, date, repo and positions
-
-| Current Kafka topic | Current producer | Canonical event | Gathering rule |
-|---|---|---|---|
-| `mme.drop.parsed.sessionchanges` | rest-messages | `SessionChangeEvent` | Maintain current session/matching phase per order book. |
-| `mme.drop.parsed.marketannouncements` | rest-messages | `MarketAnnouncementEvent` | Keep announcement time/source/scope/priority/content. Keep payload `sequenceNumber` separate from MME source sequence. |
-| `mme.drop.parsed.businessdatechanges` | rest-messages | `BusinessDateChangedEvent` | Updates business-date state. |
-| `mme.drop.parsed.initialbusinessdates` | rest-messages | `InitialBusinessDateEvent` | Initializes business-date state. |
-| `mme.drop.parsed.repoorderbookstatuses` | rest-messages | `RepoOrderbookStatusEvent` | Repo book creation/status evidence. |
-| `mme.drop.parsed.accountpositionupdates` | rest-messages | `AccountPositionEvent` | Available long/loan quantity state by asset/participant/account/investor. |
-
-### Current implementation discrepancy
-
-| Topic | Event | Rule |
+| Current Kafka topic | Canonical event | Rule |
 |---|---|---|
-| `mme.drop.parsed.systemevents` | `ImplementationSystemEvent` | Consume/preserve if needed, but mark implementation-specific because protocol rev 3.0.11 does not define this message. |
+| `mme.drop.parsed.bestbidoffers` | `BestBidOfferEvent` | Top-of-book context/cross-check. |
+| `mme.drop.parsed.equilibriumprices` | `EquilibriumPriceEvent` | Auction indicative price/imbalance. |
+| `mme.drop.parsed.indexprices` | `IndexPriceEvent` | Index/benchmark context. |
+| `mme.drop.parsed.pricelimits` | `PriceLimitsEvent` | Static/dynamic bands and breaker context. |
+| `mme.drop.parsed.referenceprices` | `ReferencePriceEvent` | **Selected**: live market-price state, not identity master data. |
+| `mme.drop.parsed.awaymarketbbo` | `AwayMarketBestBidOfferEvent` | Away-market top-of-book context. |
+| `mme.drop.parsed.delayedlastmatchprices` | `DelayedLastMatchPriceEvent` | Delayed price + actual execution time. |
 
-## Source-quality topics required by the assembler
+### Session/business context
 
-These are important because a source sequence consumed by DROP may fail normal parsing and must not disappear from coverage accounting.
-
-| Topic | Use |
-|---|---|
-| `mme.drop.parsed.unhandled` | Preserve a source record that was parsed enough to identify as unhandled. Emit `UnknownDropMessageEvent`. |
-| `mme.drop.raw.messages.dlq` | Preserve a parsing failure when sequence/source headers are available. Emit `SourceParseFailureEvent`. |
-
-Order/trade enrichment DLQs are downstream application-quality signals; they are not the primary feed-continuity source.
-
-## Enriched topics - use only as secondary views
-
-| Topic | Current issue relevant to surveillance | Recommendation |
+| Current Kafka topic | Canonical event | Rule |
 |---|---|---|
-| `mme.drop.enriched.orders` | Redis lookup failures can result in missing/degraded enrichment; replay can duplicate output. | Use raw order + THE EYE reference state as authoritative. Compare enriched output for convenience/quality only. |
-| `mme.drop.enriched.trades` | Redis pending-list matching is not atomic with Kafka output; crash/replay can duplicate or change pairing outcome. | Build deterministic `MatchedTradeEvent` from raw `TradeSideEvent`s; treat current enriched trade as optional cross-check. |
+| `mme.drop.parsed.sessionchanges` | `SessionChangeEvent` | Maintain market/session phase. |
+| `mme.drop.parsed.marketannouncements` | `MarketAnnouncementEvent` | Preserve announcement scope/content; payload sequence is not MME sequence. |
+| `mme.drop.parsed.businessdatechanges` | `BusinessDateChangedEvent` | Update business-date state. |
+| `mme.drop.parsed.repoorderbookstatuses` | `RepoOrderbookStatusEvent` | Repo book/status evidence. |
 
-## Reference-data timing rule
+## Reference/identity topics excluded from this worker
 
-The official protocol guarantees the initial reference-data publication completes before real-time data, then allows reference updates at any later time.
-
-Therefore the surveillance reference projector must:
+The current runtime does **not** subscribe to:
 
 ```text
-1. consume initial reference events
-2. observe EndOfReferenceData
-3. mark ReferenceReady
-4. continue consuming reference updates forever
-5. resolve business events against the reference version effective at that source sequence
+mme.drop.reference.assets
+mme.drop.reference.orderbooks
+mme.drop.reference.participants
+mme.drop.reference.actors
+mme.drop.reference.accounts
+mme.drop.reference.accounttypes
+mme.drop.reference.accountgroups
+mme.drop.reference.investors
+mme.drop.reference.custodians
+mme.drop.parsed.endofreferencedata
+mme.drop.parsed.initialbusinessdates
+mme.drop.parsed.corporateactions
+mme.drop.parsed.exchangerates
+mme.drop.parsed.accountpositionupdates
 ```
 
-See [[10 - Reference State and Enrichment Strategy|Reference State and Enrichment Strategy]].
+For current live surveillance, resolve required identity/reference values from the existing Redis cache.
 
-## Source sequence gathering rule
+This is a **runtime performance/scope decision**, not a statement that those domains are unimportant. Historical/as-of reconstruction requirements remain a separate architecture concern; see [[10 - Reference State and Enrichment Strategy|Reference State and Enrichment Strategy]].
 
-Do **not** look for contiguous values inside any table above. The topics are filtered by message family/type.
+## Enriched topics
 
-Strict source ordering/coverage is reconstructed by [[09 - Source Assembly and Ordering Logic|Source Assembly and Ordering Logic]], using source-sequence metadata and validated current ingestor progress/watermarks.
+`mme.drop.enriched.orders` and `mme.drop.enriched.trades` remain secondary/convenience views, not the primary source events for this ingestion path.
 
-## Phase-0 validation before coding detectors
+THE EYE uses raw parsed order/trade semantics plus Redis reference resolution so it retains native evidence and controls deterministic pairing/dedupe itself.
 
-Run one controlled DROP session and prove:
+## Continuity rule after topic filtering
 
-- every source Kafka record required by surveillance has `mme-sequence-number`;
-- header `drop-message-id`, `drop-group-id`, `drop-partition-id` agree with payload fields;
-- the union of normal + unhandled/source-DLQ records represents the expected global source sequence after dedupe;
-- duplicate Start/Commit copies can be deterministically identified;
-- business-date and sequence-reset/epoch behavior is known;
-- the three Redis `next_mme_sequence_number` checkpoints can be safely interpreted as progress watermarks.
+Do not look for contiguous `MmeSequenceNumber` values in this selected set.
 
-If any of these fail, fix/extend the ingestor metadata contract **before** the fraud engine depends on exact source ordering.
+Instead:
+
+```text
+MmeSequenceNumber
+    -> relative global source ordering/evidence among selected events
+
+TopicSequenceEpoch + TopicSequenceNumber
+    -> selected-topic continuity/gap detection
+```
+
+The active source assembly logic is documented in [[09 - Source Assembly and Ordering Logic|Source Assembly and Ordering Logic]].
+
+## Topic additions/removals
+
+A topic is added to or removed from the hot path by changing `TopicConsumption:Topics` and deploying configuration.
+
+Before adding a topic:
+
+1. confirm its adapter exists in `DropSourceTopicRegistry`;
+2. confirm the producer emits the required topic-sequence headers;
+3. confirm the topic's sequence scope/partition rule;
+4. define why the detector needs it in the real-time path;
+5. update this note.
+
+The worker validates that configured topics have registered adapters and reports missing broker topics as degraded coverage unless configured to fail startup.
 
 ## Source basis
 
 - [[DROP-Current-System/01 - DROP Protocol Overview|DROP Protocol Overview]]
 - [[DROP-Current-System/02 - DROP Message Catalog|DROP Message Catalog]]
-- [[DROP-Current-System/03 - Current DROP Runtime Architecture|Current DROP Runtime Architecture]]
 - [[DROP-Current-System/08 - Kafka Topic Catalog|Kafka Topic Catalog]]
-- [[DROP-Current-System/12 - Runtime Guarantees and Known Gaps|Runtime Guarantees and Known Gaps]]
-- [[DROP-Current-System/15 - Source Classification and Reliability|Source Classification and Reliability]]
+- [[DROP-Current-System/09 - Redis State and Reference Cache|Redis State and Reference Cache]]
 
 ## Navigation
 
-- [[07 - Complete Surveillance Event Catalog|Complete Surveillance Event Catalog]]
+- [[01 - Global Sequence and Feed Continuity|Global Sequence and Feed Continuity]]
 - [[09 - Source Assembly and Ordering Logic|Source Assembly and Ordering Logic]]
 - [[10 - Reference State and Enrichment Strategy|Reference State and Enrichment Strategy]]
-- [[02 - Canonical Event Contract|Canonical Event Contract]]
+- [[15 - MME Sequence Header Encoding Verification|Kafka Sequence Header Encoding Verification]]
+- [[16 - Trading-Only Acquisition and Topic Sequence Guard|Trading-Only Acquisition and Topic Sequence Guard]]
