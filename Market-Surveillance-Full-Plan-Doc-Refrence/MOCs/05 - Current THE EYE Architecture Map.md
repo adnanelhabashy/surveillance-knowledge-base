@@ -26,10 +26,11 @@ flowchart TB
     DOTNET[[Architecture/Implementation-Start/05 - Dotnet Solution Starting Structure]]
     SLICE[[Architecture/Implementation-Start/04 - First Vertical Slice]]
     PIPE[[Architecture/Surveillance Detection Pipeline]]
+    AI[[Implementation-Architecture/AI-and-Deterministic-Detection-Decision-Architecture]]
 
     DROP --> CUR
     HOME --> CUR
-    CUR --> SEQ & CONTRACT & ACQ & ASM & REF & BLOCKS & DQ & DOTNET & SLICE & PIPE
+    CUR --> SEQ & CONTRACT & ACQ & ASM & REF & BLOCKS & DQ & DOTNET & SLICE & PIPE & AI
 ```
 
 ## Runtime path
@@ -55,6 +56,23 @@ TheEye.Silo
 Surveillance alerts
 ```
 
+## Detection and AI boundary
+
+```text
+Orleans surveillance state
+        ↓
+Detectors → FactBundle
+        ↓
+RulesEngine + ICasePolicy ─────→ ALERT / NO ALERT
+        │
+        ├────→ supervised AI risk/ranking when labels exist
+        └────→ unsupervised anomaly triage for unknown behavior
+```
+
+Known manipulation patterns remain evidence-driven and deterministic. AI is used for ranking, prioritization and unknown-pattern discovery rather than replacing exact proof.
+
+See [[../Implementation-Architecture/AI-and-Deterministic-Detection-Decision-Architecture|AI and Deterministic Detection Decision Architecture]].
+
 ## Architecture rules
 
 - SourceAssembly is inside the Ingestor deployable.
@@ -66,6 +84,9 @@ Surveillance alerts
 - Source offsets commit only across contiguous durable source records.
 - Canonical Kafka begins with one ordered partition per `SequenceDomain`.
 - Coverage gaps require safe-watermark proof.
+- Known surveillance patterns are decided by deterministic evidence, RulesEngine and case policy.
+- Supervised ML is introduced after governed analyst labels exist and is used first for risk/ranking.
+- Unsupervised ML feeds anomaly review/triage and does not directly create regulatory alerts.
 
 ## Start here
 
