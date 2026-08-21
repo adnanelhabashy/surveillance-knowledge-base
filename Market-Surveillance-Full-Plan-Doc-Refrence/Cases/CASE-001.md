@@ -75,7 +75,7 @@ Recommended architecture:
 
 The AI score must be stored beside, not instead of, deterministic evidence.
 
-See [[../Implementation-Architecture/AI-and-Deterministic-Detection-Decision-Architecture|AI and Deterministic Detection Decision Architecture]].
+See [[Implementation-Architecture/AI-and-Deterministic-Detection-Decision-Architecture|AI and Deterministic Detection Decision Architecture]].
 
 ## Source
 
