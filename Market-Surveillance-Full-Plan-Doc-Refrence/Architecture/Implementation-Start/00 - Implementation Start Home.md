@@ -92,6 +92,38 @@ TheEye.Silo
 
 The Silo does **not** consume the 37 raw DROP topics for normal market/reference processing, and the Ingestor does **not** call Orleans grains directly.
 
+## Detection architecture inside the Silo
+
+The detailed case/archetype flow now lives in [[Architecture/Surveillance Detection Pipeline|Surveillance Detection Pipeline]].
+
+The important implementation contract is:
+
+```text
+OrderBook/subject state
+    -> immutable DetectorContext
+    -> archetype FactPipeline
+    -> typed FactBundle
+    -> scoped CaseRouter
+    -> archetype CaseEvaluator
+    -> RulesEngine workflow
+    -> ICasePolicy
+    -> CaseDecision
+    -> AlertDispatcher
+    -> SurveillanceAlertGrain
+```
+
+This keeps responsibilities clean:
+
+- grains own mutable state;
+- detector/fact pipelines calculate reusable measurements;
+- RulesEngine evaluates declarative conditions;
+- `ICasePolicy` is the final judge for one surveillance case;
+- alert recording owns deterministic identity, dedupe, evidence and coverage.
+
+For a **new case inside an existing archetype**, normally add only the case policy, RulesEngine workflow, pack registration and tests. Do not modify grains/contracts just because a new case was added.
+
+For a **new archetype**, add a parallel typed fact pipeline + evaluator + rule pack, and extend state only when that archetype genuinely needs new owned state.
+
 ## Core decisions
 
 1. **The MME sequence is treated as global across message types inside its real source sequence domain.** A filtered Kafka topic is not a sequence domain.
@@ -150,8 +182,9 @@ The built Ingestor has already established these facts:
 12. [[13 - Event Processing Blocks|Event Processing Blocks]]
 13. [[03 - Order Book Surveillance Core|Order Book Surveillance Core]]
 14. [[06 - First Detector Specifications|First Detector Specifications]]
-15. [[04 - First Vertical Slice|First Vertical Slice]]
-16. [[05 - Dotnet Solution Starting Structure|.NET Solution Starting Structure]]
+15. [[Architecture/Surveillance Detection Pipeline|Surveillance Detection Pipeline]]
+16. [[04 - First Vertical Slice|First Vertical Slice]]
+17. [[05 - Dotnet Solution Starting Structure|.NET Solution Starting Structure]]
 
 ## Phase 0 - mandatory proof/fixes before production Silo dependency
 
@@ -186,6 +219,7 @@ All three together
 
 ## External graph links
 
+- [[Architecture/Surveillance Detection Pipeline|Surveillance Detection Pipeline]]
 - [[DTO-Reference/00 - DTO and Data Structure Implementation Map|DTO and Data Structure Implementation Map]]
 - [[DROP-Current-System/01 - DROP Protocol Overview|DROP Protocol Overview]]
 - [[DROP-Current-System/02 - DROP Message Catalog|37 Official DROP Messages]]
