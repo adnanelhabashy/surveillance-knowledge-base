@@ -93,7 +93,7 @@ Recommended later supervised model after analyst labels exist:
 
 Identity resolution is more important than model choice for this case.
 
-See [[../Implementation-Architecture/AI-and-Deterministic-Detection-Decision-Architecture|AI and Deterministic Detection Decision Architecture]].
+See [[Implementation-Architecture/AI-and-Deterministic-Detection-Decision-Architecture|AI and Deterministic Detection Decision Architecture]].
 
 ## Source
 
