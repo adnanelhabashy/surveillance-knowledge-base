@@ -71,7 +71,7 @@ RulesEngine + ICasePolicy ─────→ ALERT / NO ALERT
 
 Known manipulation patterns remain evidence-driven and deterministic. AI is used for ranking, prioritization and unknown-pattern discovery rather than replacing exact proof.
 
-See [[../Implementation-Architecture/AI-and-Deterministic-Detection-Decision-Architecture|AI and Deterministic Detection Decision Architecture]].
+See [[Implementation-Architecture/AI-and-Deterministic-Detection-Decision-Architecture|AI and Deterministic Detection Decision Architecture]].
 
 ## Architecture rules
 
