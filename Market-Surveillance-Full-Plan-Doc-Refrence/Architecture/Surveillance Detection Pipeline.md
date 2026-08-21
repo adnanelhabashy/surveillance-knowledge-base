@@ -34,19 +34,34 @@ flowchart TB
         CON --> DISP[KeyedMarketDispatcher]
         REF & MARKET & PAIR --> DISP
 
-        DISP --> OBG[OrderBookGrain]
-        DISP --> TG[TraderGrain]
-        DISP --> AG[AccountGrain]
-        DISP --> IG[Investor state]
+        DISP --> BOOK[OrderBookGrain - dedup + ordering shell]
+        DISP --> SUBJECT[TraderGrain / AccountGrain / Investor state]
+        COV --> COVERAGE[CoverageState]
 
-        COV --> CG[CoverageState]
+        BOOK --> STATE[OrderBookGrainState - book transitions + invariants]
+        STATE --> CTX[DetectorContext - immutable assessment snapshot]
+        COVERAGE --> CTX
 
-        OBG & TG & AG & IG & CG --> DET[Reusable detector classes]
-        DET --> FB[FactBundle]
-        FB --> RR[Candidate Rule Router]
-        RR --> RULES[Rules evaluation]
-        RULES --> CORR[Alert correlation]
-        CORR --> ALERT[Surveillance Alert]
+        CTX --> PIPE[Archetype fact pipeline - e.g. SpoofLayerFactPipeline]
+        PIPE --> FACTS[Typed FactBundle - e.g. SpoofLayerFactBundle]
+
+        PACKS[RulePackCatalog - cases + rules JSON + triggers] --> ROUTER[CaseRouter - candidate selection scoped per pack]
+        TRIGGER[AssessmentTrigger - cancel / trade / query] --> ROUTER
+        FACTS --> EVAL[Archetype CaseEvaluator]
+        ROUTER --> EVAL
+        PACKS --> RULES[Microsoft RulesEngine workflows]
+        EVAL --> RULES
+        RULES --> POLICY[ICasePolicy - one judge per case]
+        POLICY --> DEC[CaseDecision - score / severity / evidence]
+
+        DEC --> AD[AlertDispatcher]
+        AD --> ALERT[SurveillanceAlertGrain - deterministic id + dedupe + evidence]
+        ALERT --> AD
+
+        BOOK --> ROLLUP[TraderWindowRollup]
+        ROLLUP --> SUBJECT
+        AD -->|newly recorded only| SIGNAL[CaseSignalSummary]
+        SIGNAL --> SUBJECT
     end
 ```
 
@@ -89,7 +104,7 @@ Silo-side projectors rebuild:
 
 ```text
 reference state as-of source sequence
-Account → Investor identity
+Account -> Investor identity
 transaction/business-date context
 market/session context
 trade-side pairing
@@ -105,9 +120,11 @@ Trader/Account/Investor state owns subject behavior across books where required.
 
 No grain expects globally contiguous sequence numbers because each grain receives only relevant events after keyed dispatch.
 
-### 5. Fraud surveillance detectors
+### 5. Detector context and reusable facts
 
-Normal .NET detector classes calculate reusable facts from explicit grain/projector state, for example:
+Detectors do not read mutable live state directly while rules are being evaluated. The grain freezes the required evidence into an immutable `DetectorContext` for the assessment.
+
+Normal .NET detector/fact-pipeline classes then calculate reusable typed measurements, for example:
 
 - cancellation ratio;
 - order lifetime;
@@ -120,13 +137,92 @@ Normal .NET detector classes calculate reusable facts from explicit grain/projec
 
 Detectors do not query raw Kafka topics, mutable Redis reference state or databases directly.
 
-### 6. Rules
+### 6. Archetype fact pipelines
 
-Rules consume typed facts and decide whether a suspicious scenario is present. Do not execute all 540 case rules for every event; route only relevant rule packs.
+Cases that need the same type of evidence share one typed archetype pipeline.
 
-### 7. Coverage on alerts
+Example:
 
-Every alert must include whether evidence coverage was complete/degraded for the sequence/time range used by the rule.
+```text
+DetectorContext
+    -> SpoofLayerFactPipeline
+    -> SpoofLayerFactBundle
+    -> SpoofLayerCaseEvaluator
+```
+
+The fact pipeline calculates measurements. It does not decide whether a regulatory case should alert.
+
+### 7. Candidate routing
+
+Do not evaluate all 540 cases on every event.
+
+`CaseRouter` selects only relevant packs using the trigger first, and later can include:
+
+```text
+FactType
+MarketPhase
+InstrumentProfile
+AvailableDataDomains
+```
+
+Routing is scoped to the archetype pack. A spoof/layer fact bundle must never be evaluated against auction, wash-trade or unrelated workflows.
+
+### 8. Rules and case policy
+
+RulesEngine workflows evaluate the typed fact bundle. `ICasePolicy` is then the final case-specific judge that converts raw rule outcomes into a `CaseDecision`.
+
+This keeps the responsibility split clear:
+
+```text
+grains own mutable state
+detectors/fact pipelines calculate facts
+RulesEngine evaluates declarative conditions
+ICasePolicy owns the case verdict
+```
+
+A `CaseDecision` carries the case id, independent score/severity, rule version, threshold version, evidence and evaluability state.
+
+### 9. Alert recording and subject signals
+
+Only alerting `CaseDecision` results reach `AlertDispatcher`.
+
+`SurveillanceAlertGrain` owns deterministic alert identity and deduplication. The dispatcher receives either `Recorded` or `Duplicate`.
+
+Subject behavior is updated in two separate ways:
+
+- every evaluated assessment can emit `TraderWindowRollup` style behavioral state;
+- only a newly recorded alert emits a `CaseSignalSummary` so replay/duplicates do not inflate subject signals.
+
+### 10. Coverage on alerts
+
+Every alert and rule result must include whether evidence coverage was complete/degraded for the sequence/time range used by the rule.
+
+Missing a required external domain means `NotEvaluableMissingDomain`, not a clean result.
+
+## Adding a case in an existing archetype
+
+Within an archetype, adding another case should not require grain or contract changes.
+
+Example: adding another case to the Spoof/Layer archetype:
+
+1. Add `XxxPolicy : ICasePolicy` in `src/TheEye.Rules/` with `CaseId`, `WorkflowName` and `Decide(outcomes) -> CaseDecision`.
+2. Add the RulesEngine workflow to the archetype rules JSON, sharing the existing typed fact bundle.
+3. Register the policy in the archetype pack, for example `RulePackCatalog.SpoofLayer.Cases`.
+4. Add policy decision tests plus fact-pipeline characterization tests with golden measurements/decisions.
+
+Normally there is **no change** to `OrderBookGrain`, canonical contracts, the fact pipeline, dispatcher or alert infrastructure.
+
+## Adding a new archetype
+
+A genuinely different evidence shape gets a parallel branch rather than modifying an unrelated one.
+
+1. Add `XxxFactPipeline` + typed `XxxFactBundle`.
+2. Reuse `DetectorContext` when possible; extend it only when the archetype genuinely needs more book/context state.
+3. Add `XxxCaseEvaluator`, scoped only to `RulePackCatalog.Xxx`.
+4. Add the new `RulePackCatalog` entry: `PackId`, `RulesFile`, `Triggers`, `Cases`.
+5. Register the evaluator in DI and inject it into the relevant grain/runtime owner.
+6. Add ingestion/triggers only if this archetype needs event types not already applied by the state owner.
+7. Put mutable state where ownership belongs: book-level -> `OrderBookGrainState`; participant/trader across books -> `TraderGrain`; account-level -> `AccountGrain`. Do not create a per-case `XxxState` unless the domain genuinely requires independent state ownership.
 
 ## Reliability gate before detectors
 
@@ -149,14 +245,16 @@ Current order:
 
 1. finish Ingestor P0 reliability fixes;
 2. canonical consumer/deserializer in Silo;
-3. ReferenceStateProjector + Account → Investor resolution;
+3. ReferenceStateProjector + Account -> Investor resolution;
 4. transaction/business-date/market/trade-pair projectors;
 5. `KeyedMarketDispatcher`;
 6. `OrderBookGrain` + subject state;
-7. first order-book detectors;
-8. spoofing/layering starter rules;
-9. alert evidence output;
-10. deterministic crash/replay tests.
+7. immutable `DetectorContext` + first archetype fact pipeline;
+8. scoped case routing + first case policies;
+9. spoofing/layering starter rules;
+10. deterministic alert recording + evidence output;
+11. subject rollups/signals;
+12. deterministic crash/replay tests.
 
 See [[Architecture/Implementation-Start/04 - First Vertical Slice|First Vertical Slice]].
 
@@ -164,6 +262,8 @@ See [[Architecture/Implementation-Start/04 - First Vertical Slice|First Vertical
 
 - [[Architecture/Implementation-Start/15 - Current Runtime Architecture and Fix Plan|Current Runtime Architecture and Fix Plan]]
 - [[Architecture/Implementation-Start/00 - Implementation Start Home|Implementation Start Home]]
+- [[Architecture/Implementation-Start/03 - Order Book Surveillance Core|Order Book Surveillance Core]]
+- [[Architecture/Implementation-Start/06 - First Detector Specifications|First Detector Specifications]]
 - [[MOCs/03 - Reusable Detector Map|Reusable Detector Map]]
 - [[MOCs/01 - Surveillance Case Map|Surveillance Case Map]]
 - [[DROP-Current-System/06 - Surveillance Data Interface Boundary|Surveillance Data Interface Boundary]]
