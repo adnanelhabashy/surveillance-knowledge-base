@@ -44,14 +44,38 @@ Placing orders without genuine intent to execute them to create false buying or 
 ## Implementation workspace
 
 - **Rule status:** Initial deterministic model
-- **Detection mode:** Rules; AI not required
+- **Detection mode:** Rules; AI not required for the alert decision
 - **Rule logic (starter):** Flag when a participant displays unusually large non-bona-fide-looking interest, cancels most of it quickly after influencing book/price, and either trades on the opposite side or gains an execution advantage. For layering, also require multiple price levels or repeated waves.
 - **Orleans grains/state:** OrderBookGrain, TraderGrain, AccountGrain, InstrumentGrain, SurveillanceGrain; keep live depth, per-order lifecycle, participant cancellation/execution stats and opposite-side fills
 - **Required event fields:** eventId, eventTime, orderId, parentOrderId/algorithmId if available, traderId, accountId, beneficialOwnerId if available, instrumentId, venueId, side, orderType, price, quantity, displayedQuantity, action(new/modify/cancel), executionQty, executionPrice, bestBid/bestAsk, depthByLevel
 - **Time window(s):** Primary 1–5 s order-lifecycle window; rolling 30–60 s participant/instrument window; 5–15 min repetition window
-- **Thresholds/calibration:** Start with displayed size ≥ 5× instrument median, cancellation ratio ≥ 80%, lifetime ≤ 3 s, price/book impact ≥ 1 tick, opposite-side execution within 10 s; layering: ≥ 3 price levels. Replace with liquidity-bucket percentiles during calibration.
+- **Thresholds/calibration:** Start with displayed size ≥ 5× instrument median, cancellation ratio ≥ 80%, lifetime ≤ 3 s, price/book impact ≥ 1 tick, opposite-side execution within 10 s; layering: ≥ 3 price levels. Replace static values with liquidity/market-phase/participant-role conditional percentiles during calibration.
 - **Alert evidence:** Full order lifecycle; before/after order-book snapshots; cancelled quantity; price/depth impact; opposite-side executions; participant metrics; repeated similar episodes; related-account links if relevant
 - **Implementation note:** Starter engineering model only. Calibrate by instrument liquidity, session phase, participant type and historical percentiles before production use.
+
+## AI / ML architecture alignment
+
+Spoofing is an ordered episode. The primary alert decision should remain deterministic and evidence-driven:
+
+```text
+large displayed order
+        -> book/price pressure
+        -> opposite-side execution
+        -> rapid cancellation
+        -> low fill / high cancellation ratio
+```
+
+Recommended architecture:
+
+- **Alert decision:** reusable detectors + typed SpoofLayer FactBundle + Microsoft RulesEngine + SpoofingPolicy
+- **Adaptive baselines:** peer-relative percentiles, t-digest/P², EWMA or robust EW-MAD
+- **Later supervised ML:** CPU GBDT such as LightGBM/XGBoost/ML.NET, used to rank/prioritize alerts after analyst labels exist
+- **Deployment:** versioned ONNX model scored in-process from .NET where practical
+- **Unsupervised anomaly models:** review/triage only; do not directly create spoofing alerts
+
+The AI score must be stored beside, not instead of, deterministic evidence.
+
+See [[../Implementation-Architecture/AI-and-Deterministic-Detection-Decision-Architecture|AI and Deterministic Detection Decision Architecture]].
 
 ## Source
 
