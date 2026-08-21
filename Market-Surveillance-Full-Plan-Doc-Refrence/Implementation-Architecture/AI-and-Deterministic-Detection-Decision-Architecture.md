@@ -227,7 +227,7 @@ This separation keeps the system explainable, replayable, regulator-friendly, CP
 
 ## Related notes
 
-- [[../Cases/CASE-001|CASE-001 — Spoofing]]
-- [[../Cases/CASE-006|CASE-006 — Circular Trading]]
-- [[../MOCs/01 - Surveillance Case Map|Surveillance Case Map]]
-- [[../MOCs/03 - Reusable Detector Map|Reusable Detector Map]]
+- [[Cases/CASE-001|CASE-001 — Spoofing]]
+- [[Cases/CASE-006|CASE-006 — Circular Trading]]
+- [[MOCs/01 - Surveillance Case Map|Surveillance Case Map]]
+- [[MOCs/03 - Reusable Detector Map|Reusable Detector Map]]
