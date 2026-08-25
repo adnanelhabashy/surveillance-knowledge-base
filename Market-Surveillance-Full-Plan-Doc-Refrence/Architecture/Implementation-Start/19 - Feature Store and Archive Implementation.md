@@ -2,7 +2,7 @@
 id: IMPL-START-19
 type: implementation-reference
 status: code-verified
-audited_commit: 664cde8f30e9a2b5731520c394097d38d6262cae
+audited_commit: 0b4af2e99e530ce56a94d894865c761b7d7306e8
 tags:
   - surveillance/implementation
   - ml/feature-store
@@ -36,75 +36,66 @@ TheEye.FeatureWriter
 
 ## `TheEye.FeatureStore`
 
-**Implemented.** The project contains the feature envelope/row model and supporting validation/revision logic, including:
+**Implemented.** The project contains the feature envelope/row model and supporting validation/revision logic, including `FeatureEnvelopeV1`, JSON/validation support, feature rows/metadata, evaluation revisions, revision comparison, publisher metrics and disabled/no-op publication.
 
-- `FeatureEnvelopeV1`
-- `FeatureEnvelopeJson`
-- `FeatureEnvelopeValidator`
-- `FeatureRow`
-- `FeatureRowMetadata`
-- `FeatureEvaluationRevision`
-- `FeatureRevisionComparer`
-- publisher metrics
-- disabled/no-op publisher support
-
-Source: [TheEye.FeatureStore](https://github.com/adnanelhabashy/the-eye-v2/tree/664cde8f30e9a2b5731520c394097d38d6262cae/TheEye.FeatureStore).
+Source: [TheEye.FeatureStore](https://github.com/adnanelhabashy/the-eye-v2/tree/0b4af2e99e530ce56a94d894865c761b7d7306e8/TheEye.FeatureStore).
 
 `TheEye.Api` registers Kafka feature publication only when `FeatureStore.Enabled` is true; otherwise it deliberately registers a no-op publisher. The API does **not** host the durable archive writer itself.
 
 ## `TheEye.FeatureWriter`
 
-**Implemented as a separate worker.** Startup behavior is explicit:
+**Implemented as a separate worker.** It supports:
 
-- binds `Kafka` and `FeatureArchive` configuration;
-- if archive is disabled, it does not start a consume-and-discard loop;
-- supports exactly one selected archive backend at runtime;
-- CSV backend uses locking/recovery and durable writes;
-- PostgreSQL backend is transactional and requires the configured feature-archive connection string;
-- unknown backend fails startup;
-- registers a Kafka quarantine publisher;
-- consumes features with manual commit through `FeatureArchiveWorker`;
-- includes a standalone PostgreSQL `export` command.
+- Kafka feature consumption with manual commit;
+- CSV archive with locking/recovery;
+- transactional PostgreSQL archive;
+- quarantine publishing;
+- explicit startup failure for unsupported backend/configuration;
+- standalone PostgreSQL export;
+- no consume-and-discard worker when archive is disabled.
 
-Source: [TheEye.FeatureWriter/Program.cs](https://github.com/adnanelhabashy/the-eye-v2/blob/664cde8f30e9a2b5731520c394097d38d6262cae/TheEye.FeatureWriter/Program.cs).
+Source: [TheEye.FeatureWriter/Program.cs](https://github.com/adnanelhabashy/the-eye-v2/blob/0b4af2e99e530ce56a94d894865c761b7d7306e8/TheEye.FeatureWriter/Program.cs).
 
-## PostgreSQL schema provisioning
+## PostgreSQL feature archive
 
-**Implemented in the local startup path.** The audited `development` head specifically changes `run-local.sh` to run:
+The current local persistence database is `theeye` on host port `5433`. Feature-archive and Orleans schemas share that local database while remaining separate schemas/operational concerns.
+
+`run-local.sh` calls:
 
 ```text
 scripts/persistence-db.sh apply-features
 ```
 
-This provisions the feature archive schema needed by the PostgreSQL writer on a fresh local run.
+for the feature-archive schema. The dedicated integration harness calls both `apply` and `apply-features` before running archive scenarios.
 
-Source: [run-local.sh](https://github.com/adnanelhabashy/the-eye-v2/blob/664cde8f30e9a2b5731520c394097d38d6262cae/run-local.sh).
-
-Infrastructure folders include dedicated `infra/feature-archive`, plus Orleans and Redis infrastructure definitions.
+Sources:
+- [run-local.sh](https://github.com/adnanelhabashy/the-eye-v2/blob/0b4af2e99e530ce56a94d894865c761b7d7306e8/run-local.sh)
+- [feature-archive-integration.sh](https://github.com/adnanelhabashy/the-eye-v2/blob/0b4af2e99e530ce56a94d894865c761b7d7306e8/scripts/feature-archive-integration.sh)
 
 ## Conflict/revision behavior
 
-The archive intentionally compares revisions rather than silently accepting same-identity conflicting payloads. The repository's own current issue analysis states that `FeatureRevisionComparer` is behaving correctly and that weakening rank/conflict detection would hide upstream nondeterminism.
+The archive intentionally compares revisions rather than silently accepting same-identity conflicting payloads. The repository's ordering analysis correctly treats archive conflicts as evidence of upstream nondeterminism rather than something to hide by weakening feature ranking.
 
-Therefore: **feature archive conflict detection is not the bug.** The current defect is ordering before feature generation. See [[21 - Current Implementation Gaps and Known Defects]].
+Therefore: **feature archive conflict detection is not the ordering fix.** See [[21 - Current Implementation Gaps and Known Defects]].
 
-## Known acceptance-harness gap
+## Synthetic dataset / acceptance harness
 
-The repository documents a separate synthetic harness problem: three circular datasets are disabled by `FeatureStoreOptions` defaults, while the integration harness launches the compiled API without explicitly supplying all dataset overrides. The intended seven-dataset acceptance run therefore needs explicit configuration.
+**Implemented and improved at the current head.** The integration script now:
 
-This is a **test/harness configuration defect**, separate from the production cross-topic ordering defect.
+- supports `FEATURE_ARCHIVE_CASE`, `FEATURE_ARCHIVE_CONFIG` and `FEATURE_ARCHIVE_CASE_FILE`;
+- has a standalone CSV feature-generation scenario;
+- can select circular, full circular-training, spoofing-training or a custom synthetic config;
+- launches each compiled .NET host from the directory containing its DLL, so its copied `appsettings.json` is loaded;
+- explicitly documents the previous failure mode where launching from repository root silently dropped `FeatureStore:Datasets` settings;
+- retains crash/replay, PostgreSQL outage/recovery, CSV-vs-PostgreSQL parity and paced-vs-speed-zero scenarios;
+- compares the seven selected feature datasets in the speed scenario when generated.
 
-Source: [current_issue.md](https://github.com/adnanelhabashy/the-eye-v2/blob/664cde8f30e9a2b5731520c394097d38d6262cae/current_issue.md).
+Source: [scripts/feature-archive-integration.sh](https://github.com/adnanelhabashy/the-eye-v2/blob/0b4af2e99e530ce56a94d894865c761b7d7306e8/scripts/feature-archive-integration.sh).
+
+A new operational guide also documents generating/publishing synthetic circular/spoofing datasets and collecting, verifying and labeling CSV features for ML work.
+
+Source: [docs/synthetic-data-feature-pipeline.md](https://github.com/adnanelhabashy/the-eye-v2/blob/0b4af2e99e530ce56a94d894865c761b7d7306e8/docs/synthetic-data-feature-pipeline.md).
 
 ## Verification surface
 
-`TheEye.FeatureWriterTests` contains dedicated tests for:
-
-- CSV archive backend;
-- partial CSV recovery;
-- feature archive worker behavior;
-- commit observer integration seam;
-- PostgreSQL archive backend;
-- PostgreSQL export.
-
-See [[22 - Test and Verification Surface]].
+`TheEye.FeatureWriterTests` contains dedicated tests for CSV durability/recovery, archive worker behavior, commit observation, PostgreSQL archive behavior and export. See [[22 - Test and Verification Surface]].
