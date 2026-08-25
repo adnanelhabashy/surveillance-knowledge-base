@@ -13,7 +13,7 @@ tags:
 > This folder is the **active starting point for THE EYE implementation**. The design is grounded in the official DROP protocol, the verified current three-ingestor/Kafka/Redis architecture and the 540-case surveillance catalog.
 
 > [!IMPORTANT]
-> **Current implemented state:** [[16 - Development Implementation Snapshot|Development Implementation Snapshot]] is the authoritative code-backed mirror of `the-eye-v2/development` at commit `664cde8f30e9a2b5731520c394097d38d6262cae`. The notes below still contain target/design material; use the snapshot and its linked implementation notes when you need to know what is actually running in code.
+> **Current implemented state:** [[16 - Development Implementation Snapshot|Development Implementation Snapshot]] is the authoritative code-backed mirror of `the-eye-v2/development` through commit `0b4af2e99e530ce56a94d894865c761b7d7306e8`. The notes below still contain target/design material; use the snapshot and its linked implementation notes when you need to know what is actually running in code.
 
 ## Complete starting graph
 
@@ -79,30 +79,33 @@ flowchart TB
 5. [[20 - Galaxy Implementation|Galaxy Implementation]]
 6. [[21 - Current Implementation Gaps and Known Defects|Current Implementation Gaps and Known Defects]]
 7. [[22 - Test and Verification Surface|Test and Verification Surface]]
+8. [[23 - Contracts and DROP Adapter Implementation|Contracts and DROP Adapter Implementation]]
+9. [[24 - Local Runtime and Persistence Implementation|Local Runtime and Persistence Implementation]]
+10. [[25 - Development Delta 664cde8 to 0b4af2e|Latest audited development delta]]
 
 ### Source correctness and target design
 
-8. [[01 - Global Sequence and Feed Continuity|Global Sequence and Feed Continuity]]
-9. [[02 - Canonical Event Contract|Canonical Event Contract]]
-10. [[08 - DROP Event Acquisition Matrix|DROP Event Acquisition Matrix]]
-11. [[09 - Source Assembly and Ordering Logic|Source Assembly and Ordering Logic]]
-12. [[14 - Data Quality and Capability Gaps|Data Quality and Capability Gaps]]
+11. [[01 - Global Sequence and Feed Continuity|Global Sequence and Feed Continuity]]
+12. [[02 - Canonical Event Contract|Canonical Event Contract]]
+13. [[08 - DROP Event Acquisition Matrix|DROP Event Acquisition Matrix]]
+14. [[09 - Source Assembly and Ordering Logic|Source Assembly and Ordering Logic]]
+15. [[14 - Data Quality and Capability Gaps|Data Quality and Capability Gaps]]
 
 ### Complete event model
 
-13. [[07 - Complete Surveillance Event Catalog|Complete Surveillance Event Catalog]]
-14. [[10 - Reference State and Enrichment Strategy|Reference State and Enrichment Strategy]]
-15. [[11 - External Event Contracts|External Event Contracts]]
-16. [[12 - Case Family Event Coverage Matrix|Case Family Event Coverage Matrix]]
-17. [[DTO-Reference/00 - DTO and Data Structure Implementation Map|DTO and Data Structure Implementation Map]] - code-facing reference for source/derived/external contracts, detector facts and core state structures.
+16. [[07 - Complete Surveillance Event Catalog|Complete Surveillance Event Catalog]]
+17. [[10 - Reference State and Enrichment Strategy|Reference State and Enrichment Strategy]]
+18. [[11 - External Event Contracts|External Event Contracts]]
+19. [[12 - Case Family Event Coverage Matrix|Case Family Event Coverage Matrix]]
+20. [[DTO-Reference/00 - DTO and Data Structure Implementation Map|DTO and Data Structure Implementation Map]] - code-facing reference for source/derived/external contracts, detector facts and core state structures.
 
 ### Processing and target structure
 
-18. [[13 - Event Processing Blocks|Event Processing Blocks]]
-19. [[03 - Order Book Surveillance Core|Order Book Surveillance Core]]
-20. [[06 - First Detector Specifications|First Detector Specifications]]
-21. [[04 - First Vertical Slice|First Vertical Slice]]
-22. [[05 - Dotnet Solution Starting Structure|.NET Solution Starting Structure]]
+21. [[13 - Event Processing Blocks|Event Processing Blocks]]
+22. [[03 - Order Book Surveillance Core|Order Book Surveillance Core]]
+23. [[06 - First Detector Specifications|First Detector Specifications]]
+24. [[04 - First Vertical Slice|First Vertical Slice]]
+25. [[05 - Dotnet Solution Starting Structure|.NET Solution Starting Structure]]
 
 ## Phase 0 - mandatory proof before detector implementation
 
@@ -142,6 +145,7 @@ Creating an event class does not mean the source is connected. See [[12 - Case F
 
 - [[16 - Development Implementation Snapshot|Development Implementation Snapshot]]
 - [[21 - Current Implementation Gaps and Known Defects|Current Implementation Gaps and Known Defects]]
+- [[25 - Development Delta 664cde8 to 0b4af2e|Latest audited development delta]]
 - [[DTO-Reference/00 - DTO and Data Structure Implementation Map|DTO and Data Structure Implementation Map]]
 - [[DROP-Current-System/01 - DROP Protocol Overview|DROP Protocol Overview]]
 - [[DROP-Current-System/02 - DROP Message Catalog|37 Official DROP Messages]]
