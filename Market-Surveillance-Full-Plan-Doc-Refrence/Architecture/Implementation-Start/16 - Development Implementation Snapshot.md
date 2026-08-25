@@ -2,7 +2,7 @@
 id: IMPL-START-16
 type: implementation-reference
 status: code-verified
-audited_commit: 664cde8f30e9a2b5731520c394097d38d6262cae
+audited_commit: 0b4af2e99e530ce56a94d894865c761b7d7306e8
 audited_branch: development
 audited_at: 2026-08-25
 tags:
@@ -14,9 +14,15 @@ tags:
 # Development Implementation Snapshot
 
 > [!IMPORTANT]
-> This is the **code-backed current implementation mirror** for `the-eye-v2/development` at commit `664cde8f30e9a2b5731520c394097d38d6262cae`. When a design note conflicts with this snapshot, this snapshot describes what is actually implemented at that commit.
+> This is the **code-backed current implementation mirror** for `the-eye-v2/development` at commit `0b4af2e99e530ce56a94d894865c761b7d7306e8`. When a design note conflicts with this snapshot, this snapshot describes what is actually implemented at that audited commit.
 
-Source commit: [the-eye-v2@664cde8f](https://github.com/adnanelhabashy/the-eye-v2/commit/664cde8f30e9a2b5731520c394097d38d6262cae)
+Source commit: [the-eye-v2@0b4af2e](https://github.com/adnanelhabashy/the-eye-v2/commit/0b4af2e99e530ce56a94d894865c761b7d7306e8)
+
+## Audit method
+
+The full source/runtime audit was performed at `664cde8f30e9a2b5731520c394097d38d6262cae`. While the audit was in progress, `development` advanced by two commits to `0b4af2e99e530ce56a94d894865c761b7d7306e8`. The exact commit delta was then audited as well. See [[25 - Development Delta 664cde8 to 0b4af2e]].
+
+That delta changed feature integration/configuration, local Kafka infrastructure, CORS and PostgreSQL naming; it did not modify the core grains, SiloConsumer, detectors, rules, source assembly or Galaxy projection architecture.
 
 ## Status legend
 
@@ -56,7 +62,7 @@ flowchart LR
 ```
 
 > [!WARNING]
-> The canonical and matched-trade lanes are still consumed independently before they mutate the same Orleans state. The repository itself documents this as a real cross-topic ordering defect. See [[21 - Current Implementation Gaps and Known Defects]].
+> The canonical and matched-trade lanes are still consumed independently before they mutate the same Orleans state. The latest two commits did not change this. See [[21 - Current Implementation Gaps and Known Defects]].
 
 ## Physical project inventory
 
@@ -79,14 +85,14 @@ flowchart LR
 | `TheEye.Galaxy.Web` | React/Three.js investigation UI | Implemented |
 | `TheEye.GalaxyLoad` | Galaxy load scenario/runner | Implemented |
 | `TheEye.Api` | ASP.NET Core API, co-hosted Orleans silo, auth, rate limiting, Galaxy queries, SignalR, dashboard, development ingestion endpoints | Implemented |
-| `TheEye.SyntheticData` | Synthetic surveillance data generation | Implemented |
+| `TheEye.SyntheticData` | Synthetic surveillance data generation/publishing | Implemented |
 | test projects | unit, ingestion, source-assembly, silo, feature-writer, persistence and synthetic tests | Implemented |
 
-The ASP.NET project targets `.NET 10` and currently references Orleans `10.2.2`, ASP.NET Core JWT bearer `10.0.10`, Confluent.Kafka `2.15.0`, and the Orleans dashboard. Source: [TheEye.Api.csproj](https://github.com/adnanelhabashy/the-eye-v2/blob/664cde8f30e9a2b5731520c394097d38d6262cae/TheEye.Api/TheEye.Api.csproj).
+The ASP.NET project targets `.NET 10` and references Orleans `10.2.2`, ASP.NET Core JWT bearer `10.0.10`, Confluent.Kafka `2.15.0`, and the Orleans dashboard. Source: [TheEye.Api.csproj](https://github.com/adnanelhabashy/the-eye-v2/blob/0b4af2e99e530ce56a94d894865c761b7d7306e8/TheEye.Api/TheEye.Api.csproj).
 
 ## Implemented Orleans state owners
 
-The grain contracts in the audited code expose:
+The current grain contracts expose:
 
 - `IOrderBookGrain`
 - `ICoordinationWindowGrain`
@@ -95,9 +101,9 @@ The grain contracts in the audited code expose:
 - `IActorGrain`
 - `ISurveillanceAlertGrain`
 
-Source: [GrainInterfaces.cs](https://github.com/adnanelhabashy/the-eye-v2/blob/664cde8f30e9a2b5731520c394097d38d6262cae/TheEye.GrainContracts/Grains/GrainInterfaces.cs).
+Source: [GrainInterfaces.cs](https://github.com/adnanelhabashy/the-eye-v2/blob/0b4af2e99e530ce56a94d894865c761b7d7306e8/TheEye.GrainContracts/Grains/GrainInterfaces.cs).
 
-The larger planned grain set in [[05 - Dotnet Solution Starting Structure]] — such as `CoverageStateGrain`, `AccountGrain`, `InvestorGrain`, `PositionGrain`, `RelationshipGrain`, auction/settlement/lending grains — is **not the current physical implementation** at this commit.
+The larger planned grain set in [[05 - Dotnet Solution Starting Structure]] — such as `CoverageStateGrain`, `AccountGrain`, `InvestorGrain`, `PositionGrain`, `RelationshipGrain`, auction/settlement/lending grains — is **not the current physical implementation**.
 
 ## Implemented surveillance scope
 
@@ -106,7 +112,7 @@ Two active rule packs are registered:
 1. `SpoofLayer`
 2. `WashMatched`
 
-The active case policies in those packs are:
+The active case policies are:
 
 - Spoofing
 - Self Trade
@@ -114,7 +120,7 @@ The active case policies in those packs are:
 - Matched Trade
 - Circular Trade
 
-This means the repository contains the architectural catalog for hundreds of cases, but the active executable case implementation at this commit is a much smaller subset. See [[18 - Detectors Rules and Alerts Implementation]].
+The 540-case knowledge catalog is the target surveillance universe; it is not a claim that 540 executable policies currently exist. See [[18 - Detectors Rules and Alerts Implementation]].
 
 ## Current implementation references
 
@@ -126,10 +132,11 @@ This means the repository contains the architectural catalog for hundreds of cas
 - [[22 - Test and Verification Surface]]
 - [[23 - Contracts and DROP Adapter Implementation]]
 - [[24 - Local Runtime and Persistence Implementation]]
+- [[25 - Development Delta 664cde8 to 0b4af2e]]
 - [[DTO-Reference/00 - DTO and Data Structure Implementation Map|DTO and Data Structure Implementation Map]]
 
 ## Audit scope
 
-Included: executable source, project files, runtime registrations, configuration-facing code, infrastructure/scripts, tests and the repository's own current-issue analysis.
+Included: executable source, project files, runtime registrations, configuration-facing code, infrastructure/scripts, tests and repository-maintained operational/issue material.
 
 Excluded: generated/build artifacts such as `bin`, `obj`, package caches and other non-source outputs.
