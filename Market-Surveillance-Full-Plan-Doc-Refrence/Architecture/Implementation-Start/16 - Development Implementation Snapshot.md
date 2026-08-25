@@ -124,6 +124,8 @@ This means the repository contains the architectural catalog for hundreds of cas
 - [[20 - Galaxy Implementation]]
 - [[21 - Current Implementation Gaps and Known Defects]]
 - [[22 - Test and Verification Surface]]
+- [[23 - Contracts and DROP Adapter Implementation]]
+- [[24 - Local Runtime and Persistence Implementation]]
 - [[DTO-Reference/00 - DTO and Data Structure Implementation Map|DTO and Data Structure Implementation Map]]
 
 ## Audit scope
