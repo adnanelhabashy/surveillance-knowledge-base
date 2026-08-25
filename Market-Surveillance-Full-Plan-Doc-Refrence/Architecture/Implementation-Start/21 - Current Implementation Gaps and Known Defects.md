@@ -2,7 +2,7 @@
 id: IMPL-START-21
 type: implementation-gap-register
 status: code-verified
-audited_commit: 664cde8f30e9a2b5731520c394097d38d6262cae
+audited_commit: 0b4af2e99e530ce56a94d894865c761b7d7306e8
 tags:
   - surveillance/implementation
   - architecture/gaps
@@ -14,13 +14,13 @@ tags:
 Parent: [[16 - Development Implementation Snapshot]]
 
 > [!DANGER]
-> The most important current correctness issue is **cross-topic ordering into Orleans state**. It is documented by the code repository itself and should not be hidden by changing feature-archive ranking.
+> The most important current correctness issue is **cross-topic ordering into Orleans state**. The later development commits changed feature-harness/configuration behavior, but they did **not** change `TheEye.SiloConsumer` into a single authoritative ordered stream.
 
 ## G1 — canonical and matched-trade ordering race
 
 **Status: Open / real pipeline defect.**
 
-Current runtime:
+Current runtime remains:
 
 ```text
 canonical topic ---------\
@@ -28,14 +28,7 @@ canonical topic ---------\
 matched-trade topic -----/
 ```
 
-Because the two Kafka lanes are consumed independently, a historical matched trade can be appended after newer canonical book activity. The matched-trade mapper already preserves source lineage, but if its sequence is older than the current watermark, `SourceSequenceMax` does not advance.
-
-The repository identifies arrival-order assumptions that make the race visible:
-
-- `SubjectRollingWindow` uses FIFO/head eviction;
-- `BoundedTimeSeries` uses the same style;
-- `OrderBookGrainState` evicts using the incoming event timestamp, allowing an old event to weaken effective event-time progression;
-- `SpoofLayerFactPipeline` can select the last imbalance sample by collection order rather than guaranteed event-time order.
+Because the two Kafka lanes are consumed independently, a historical matched trade can reach a grain after newer canonical activity. The ordering analysis in the repository identifies arrival-order assumptions in rolling windows/state that can make the resulting feature payload depend on delivery timing.
 
 Consequence:
 
@@ -49,21 +42,19 @@ same feature identity + same revision rank + different state history
 
 The archive is correctly exposing the upstream nondeterminism.
 
-Primary source: [current_issue.md](https://github.com/adnanelhabashy/the-eye-v2/blob/664cde8f30e9a2b5731520c394097d38d6262cae/current_issue.md).
+Primary diagnosis: [current_issue.md](https://github.com/adnanelhabashy/the-eye-v2/blob/0b4af2e99e530ce56a94d894865c761b7d7306e8/current_issue.md).
 
 ## G2 — enriched-trade path is not authoritative ordering input
 
 **Status: Open / degraded path.**
 
-The repository states that the production enriched-trade path assigns source sequence `0` because that feed lacks comparable MME lineage. Unsequenced enriched trades therefore must not silently be treated as authoritative mutations for event-ordered book features.
-
-The recommended direction in `current_issue.md` is to quarantine or explicitly mark them degraded/non-authoritative until comparable ordering/progress metadata exists.
+The repository diagnosis states that the production enriched-trade compatibility path lacks comparable MME sequence lineage and can assign source sequence `0`. Such events must not be treated as equivalent to source-ordered canonical mutations for features that depend on deterministic book history.
 
 ## G3 — authoritative ordered market-dispatch stream is recommended, not implemented
 
-**Status: Planned / not found in audited code.**
+**Status: Planned / not found at current head.**
 
-The repository recommends this future shape:
+Recommended direction in the repository diagnosis:
 
 ```text
 surv.drop.canonical.v1
@@ -81,13 +72,13 @@ single SiloConsumer route per order book
 OrderBookGrain + CoordinationWindowGrain
 ```
 
-The audited `TheEye.SiloConsumer` still starts separate canonical and matched-trade consumers, so `surv.market.ordered.v1` must **not** be documented as implemented yet.
+The audited `TheEye.SiloConsumer` still starts separate canonical and matched-trade consumers. No `surv.market.ordered.v1` implementation was added in the two commits between `664cde8f` and current head `0b4af2e9`.
 
-## G4 — rolling state needs event-time hardening
+## G4 — rolling state still needs deterministic event-time proof
 
-**Status: Recommended / not verified implemented at audited SHA.**
+**Status: Recommended / not verified implemented.**
 
-The repository's recommended hardening is:
+The repository recommends:
 
 - sort rolling data by `(eventTime, sourceSequence, eventId)`;
 - persist a monotonic event-time watermark;
@@ -96,15 +87,20 @@ The repository's recommended hardening is:
 - reject/metric events older than retained horizon;
 - add permutation tests proving identical state/features under messy timestamps.
 
-These are remediation requirements, not current guarantees.
+These remain acceptance requirements unless/until source changes and tests prove them.
 
-## G5 — seven-dataset feature acceptance harness is not reliably enabled
+## G5 — seven-dataset harness configuration problem
 
-**Status: Open harness/configuration defect.**
+**Status: Resolved at current head.**
 
-Three circular datasets are disabled by feature-store defaults. Although application settings can enable them, the feature archive integration harness launches compiled processes without explicitly forcing all seven dataset overrides. The harness needs explicit seven-dataset configuration for each API process.
+The earlier diagnosis correctly found that launching compiled .NET DLLs from repository root caused each host to miss its copied `appsettings.json`, so `FeatureStore:Datasets` settings were silently lost and three circular datasets were not emitted.
 
-See [[19 - Feature Store and Archive Implementation]].
+The current integration script fixes the launch working directory: each DLL is now started from its own output directory, allowing `appsettings.json` to load. It also adds dynamic synthetic configuration and a CSV feature-generation scenario.
+
+Source: [feature-archive-integration.sh](https://github.com/adnanelhabashy/the-eye-v2/blob/0b4af2e99e530ce56a94d894865c761b7d7306e8/scripts/feature-archive-integration.sh).
+
+> [!NOTE]
+> `current_issue.md` still contains the original harness diagnosis, so read that section historically. The executable harness at `0b4af2e9` contains the fix.
 
 ## G6 — architecture catalog is much larger than executable case coverage
 
@@ -121,7 +117,7 @@ Do not label the remaining case catalog as implemented.
 
 **Status: Planned / not found.**
 
-The current grain contracts contain OrderBook, CoordinationWindow, CoordinationDeepScan, Trader, Actor and SurveillanceAlert grains. Planned state owners such as Account, Investor, Position, Relationship, Coverage, Auction, Settlement and SecuritiesLoan grains were not found as current implementations at the audited SHA.
+The current grain contracts contain OrderBook, CoordinationWindow, CoordinationDeepScan, Trader, Actor and SurveillanceAlert grains. Planned state owners such as Account, Investor, Position, Relationship, Coverage, Auction, Settlement and SecuritiesLoan grains were not found as current implementations.
 
 ## G8 — target project boundaries differ from current physical solution
 
@@ -129,18 +125,18 @@ The current grain contracts contain OrderBook, CoordinationWindow, CoordinationD
 
 The target design names logical projects such as `TheEye.Projections`, `TheEye.Alerting` and `TheEye.ExternalAdapters`. These projects do not exist physically in the audited root. Their current responsibilities are distributed across API, Silo, GalaxyProjection, Ingestion, SourceAssembly and other projects.
 
+## G9 — repository run docs/config were recently normalized to one local database
+
+**Status: Resolved consistency cleanup at current head.**
+
+Current local persistence documentation/scripts use PostgreSQL database `theeye`, not the older `theeye_orleans` name. This was corrected across the feature archive, persistence scripts, tests and runtime docs in commit `0b4af2e9`.
+
 ## Do not “fix” the wrong layer
 
-The current repository explicitly rejects hiding nondeterminism by:
-
-- weakening feature revision rank;
-- adding arbitrary hash/match-id tiebreakers;
-- accepting “last row wins” conflicts;
-- cleaning only the synthetic fixture.
-
-The correctness fix belongs in authoritative event ordering/state application while archive conflict detection remains strict.
+Do not hide source/state nondeterminism by weakening feature revision rank, adding arbitrary tiebreakers or accepting last-row-wins conflicts. The correctness fix belongs in authoritative event ordering/state application while archive conflict detection remains strict.
 
 Related:
 - [[17 - Runtime Pipeline and Orleans Implementation]]
 - [[19 - Feature Store and Archive Implementation]]
 - [[22 - Test and Verification Surface]]
+- [[25 - Development Delta 664cde8 to 0b4af2e]]
